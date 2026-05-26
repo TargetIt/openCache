@@ -44,7 +44,6 @@ uint32_t CacheConfig::get_set_index(addr_t addr) const {
 uint32_t CacheConfig::get_bank_index(addr_t addr) const {
     if (num_banks <= 1) return 0;
     // Bank interleaving at byte granularity
-    uint32_t bank_bits = log2_u32(num_banks);
     return static_cast<uint32_t>((addr >> 2) & (num_banks - 1));
 }
 

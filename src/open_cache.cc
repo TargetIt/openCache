@@ -19,8 +19,6 @@ BaselineCache::~BaselineCache() {
 }
 
 CacheResult BaselineCache::access(const CacheRequest &req) {
-    uint64_t time = 0;
-
     TagProbeResult probe = m_tag_array->probe(req.address, req.is_write());
     m_stats.record_access(req.type, probe.status);
 
