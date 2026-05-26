@@ -8,19 +8,56 @@
 
 ---
 
-## 一、结论先行：Non-Blocking Cache
+## 一、概念定义：什么是 Non-Blocking Cache
 
-**GPGPU-Sim 的 Texture Cache 是一个非阻塞 (non-blocking) 缓存。**
+在深入分析之前，先明确本文使用的定义（源自 Kroft 1981 "Lockup-Free Cache"）：
 
-证据链：
+> **Non-Blocking (Lockup-Free) Cache**: 当缓存**没有空闲的 cache line 可以分配**时（即一个 set 中所有 way 都已被占用且无法立刻驱逐），仍然能够接受新的 miss 请求——即支持 **miss-on-miss**（多个 miss 同时在飞行中）。
 
-1. **Hit-under-miss**: tag 命中后请求立即入队 `fragment_fifo`，不会因之前的 miss 未完成而被阻塞。`access()` 内部对 tag array 的 `access()` 调用后立即 `fill()`（标记 valid），后续对同地址的访问直接命中。
+严格意义上，这要求缓存在面对 "set 内所有 way 均处于 RESERVED 状态（等待 fill）" 时，不返回 RESERVATION_FAIL，而是继续接受新请求。
 
-2. **Miss-under-miss**: ROB（Reorder Buffer）可以容纳多个未完成的 miss。每个 miss 在 ROB 中分配一个独立条目，多个 miss 可以同时在飞行中。ROB 容量 = `m_rob_entries`（通过配置设定）。
+在这个定义下：
 
-3. **无阻塞等待**: `access()` 的唯一失败条件是 FIFO 满（`fragment_fifo.full() || request_fifo.full() || rob.full()`）→ 返回 `RESERVATION_FAIL`。这是**背压 (backpressure)**，不是阻塞——调用方下个周期重试即可。
+- **Miss-on-miss 支持**: ✅ 有。ROB 支持多个未完成 miss 同时飞行。
+- **Set 满时仍不阻塞**: ⚠️ **几乎不会发生**。原因见下文。
 
-4. **异步完成**: 请求从 `access()` 起就进入 FIFO 管线，与缓存的其他操作解耦。完成通过 `access_ready()` / `next_access()` 异步通知。
+## 二、结论：Texture Cache 实际上是一个"伪 Non-Blocking" Cache
+
+**GPGPU-Sim 的 Texture Cache 在效果上是 non-blocking 的**，但这归功于它的 "立即 fill" 策略而非结构上的 non-blocking 设计。
+
+### 2.1 为什么几乎不阻塞
+
+在 `access()` 的 MISS 路径中（`gpu-cache.cc:2021-2061`）：
+
+```cpp
+m_tags.access(block_addr, time, cache_index, mf);   // ① 分配行 → RESERVED
+m_rob.push(rob_entry(cache_index, mf, block_addr));  // ② ROB 登记
+m_tags.fill(cache_index, time, mf);                  // ③ 立即 fill → VALID!
+m_request_fifo.push(mf);                             // ④ 排队发请求
+```
+
+关键在第 ③ 步：`m_tags.fill()` **在同一个 `access()` 调用内**将行从 RESERVED 转为 VALID。**RESERVED 的时间窗口为 0 周期**。因此 GPGPU-Sim `tag_array::probe()` 中的 `all_reserved` 检查（判断所有 way 是否都处于 RESERVED 状态）几乎永远不会触发——因为 way 在 `access()` 返回前就已经 VALID 了。
+
+### 2.2 真正的阻塞点：FIFO 背压
+
+tex_cache 的实际阻塞点是 FIFO 容量：
+
+```cpp
+if (m_fragment_fifo.full() || m_request_fifo.full() || m_rob.full())
+    return RESERVATION_FAIL;
+```
+
+这是**结构性冒险 (structural hazard)**——资源（FIFO 槽位）不足，而非 "等待某个 miss 完成"。调用方下周期重试即可。
+
+### 2.3 证据链
+
+1. **Hit-under-miss**: tag 命中后请求立即入队 `fragment_fifo`，不会因之前的 miss 未完成而被阻塞。tag 在 `access()` 中即刻标记 VALID，后续对同地址的访问直接命中。
+
+2. **Miss-under-miss**: ROB 可以容纳多个未完成的 miss。每个 miss 在 ROB 中分配一个独立条目，多个 miss 可以同时在飞行中。ROB 容量 = `m_rob_entries`。
+
+3. **Set 满时不阻塞（事实上的）**: tag 在 access() 返回前已从 RESERVED→VALID，`all_reserved` 条件永假。唯一的阻塞来自 FIFO 满（资源不足）。
+
+4. **异步完成**: 请求从 `access()` 起就进入 FIFO 管线，完成通过 `access_ready()` / `next_access()` 异步通知。
 
 ---
 
@@ -204,7 +241,31 @@ struct data_block {
 
 ---
 
-## 四、Blocking vs Non-Blocking 深度分析
+## 五、Blocking vs Non-Blocking 基于统一定义的分析
+
+### 5.1 统一定义
+
+按照 Kroft 1981 的定义，**non-blocking cache** 的核心判据是：
+
+> 当 set 内没有空闲的 cache line 可分配时，缓存是否仍能接受新的 miss？
+
+具体到代码层面：`tag_array::probe()` 中的 `all_reserved` 检查——当 set 内所有 way 都是 RESERVED（或受保护的脏行）时，是否返回 `RESERVATION_FAIL`。
+
+### 5.2 tex_cache：事实上的 non-blocking
+
+tex_cache 在 `access()` 中调用 `m_tags.access()` 后**立即**调用 `m_tags.fill()`。行在同一个 `access()` 调用中完成 RESERVED→VALID 转换，RESERVED 窗口为 **0 周期**。因此 `all_reserved` 条件几乎永不触发。
+
+tex_cache 的阻塞点不是 "没有 cache line"，而是 FIFO 资源耗尽：
+```cpp
+if (m_fragment_fifo.full() || m_request_fifo.full() || m_rob.full())
+    return RESERVATION_FAIL;
+```
+
+### 5.3 baseline_cache (L1D/L2)：结构性非阻塞
+
+baseline_cache 的行从 `access()` 分配到 `fill()` 回调之间可能处于 RESERVED 状态**数十周期**。在高并发 miss 场景下，一个 set 的所有 way 可能同时变为 RESERVED，触发 `all_reserved` → `RESERVATION_FAIL`。
+
+但这**不是** "一次只能处理一个 miss" 的阻塞缓存设计。MSHR 的多条目支持允许多个 miss 同时飞行（不同地址或不同 set）。阻塞仅发生在**同一个 set 的资源耗尽**时——这是结构性资源限制，不是设计哲学上的阻塞。
 
 ### 4.1 blocking cache 的定义
 

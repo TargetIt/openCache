@@ -7,28 +7,62 @@
 
 ---
 
-## 一、结论先行
+## 一、概念定义：什么是 Non-Blocking Cache
+
+在深入分析之前，先明确本文使用的定义（源自 Kroft 1981 "Lockup-Free Cache"）：
+
+> **Non-Blocking (Lockup-Free) Cache**: 当缓存**没有空闲的 cache line 可以分配**时（即一个 set 中所有 way 都已被占用且无法立刻驱逐），仍然能够接受新的 miss 请求——即支持 **miss-on-miss**（多个 miss 同时在飞行中）。
+
+严格意义上，这要求缓存在面对 "set 内所有 way 均处于 RESERVED 状态（等待 fill）" 时，不返回 RESERVATION_FAIL，而是继续接受新请求。
 
 ### 1.1 类型判定
 
-| 缓存 | 类型 | 关键机制 |
-|------|------|---------|
-| **L1 Data Cache** | **Non-Blocking** | MSHR 合并 + miss_queue + bank 延迟队列 |
-| **L2 Cache** | **Non-Blocking** | MSHR 合并 + FIFO 管线（icnt_L2_queue ↔ L2_dram_queue ↔ dram_L2_queue） |
-| **L1 指令/常量缓存** | **Non-Blocking** | 同 baseline_cache，MSHR + miss_queue |
+| 缓存 | Miss-on-miss | Set 满时不阻塞 | 关键机制 |
+|------|-------------|---------------|---------|
+| **L1 Data Cache** | ✅ (MSHR) | ❌ — all_reserved 时 RESERVATION_FAIL | MSHR 合并 + miss_queue |
+| **L2 Cache** | ✅ (MSHR) | ❌ — 同上 | MSHR 合并 + FIFO 管线 |
+| **L1 Texture Cache** | ✅ (ROB) | ✅ 事实上的 — 立即 fill 使 RESERVED 窗口为 0 | ROB + 预 fill |
 
-三个缓存都是 **non-blocking** 的。它们的核心机制是 **MSHR (Miss Status Holding Register)** + **miss_queue**——允许多个 miss 同时在飞行中，每个 miss 在 MSHR 中有独立条目。
+**L1D/L2 是 "非阻塞设计但存在结构性阻塞点" 的缓存**——它们支持 miss-under-miss（MSHR 多条目），但当一个 set 的全部 way 都处于 RESERVED 时，`tag_array::probe()` 返回 `RESERVATION_FAIL`。这不是设计上的阻塞缓存（不是 "一次只能处理一个 miss"），而是缓存行资源耗尽导致的结构性背压。
 
-### 1.2 与 Texture Cache 的本质区别
+### 1.2 all_reserved 机制的代码证据
+
+GPGPU-Sim `tag_array::probe()` （`gpu-cache.cc:260-334`）中的关键逻辑：
+
+```cpp
+bool all_reserved = true;
+for (unsigned way = 0; way < m_config.m_assoc; way++) {
+    // ...tag match checks...
+    if (!line->is_reserved_line()) {
+        // 检查是否可驱逐:
+        // - 非 MODIFIED 的干净行: 可驱逐
+        // - MODIFIED 但 dirty_percentage >= wr_percent: 可驱逐
+        // - MODIFIED 且 dirty_percentage < wr_percent: 不可驱逐 (保护脏行)
+        if (!line->is_modified_line() ||
+            dirty_line_percentage >= m_config.m_wr_percent) {
+            all_reserved = false;  // 至少有一个可驱逐的 way
+        }
+    }
+}
+if (all_reserved) {
+    return RESERVATION_FAIL;  // 所有 way 都是 RESERVED 或被保护的脏行
+}
+```
+
+**触发 all_reserved 的条件**: 一个 set 中所有 way 要么是 RESERVED（等待 fill），要么是 MODIFIED 且脏行比例未达阈值（被保护的脏行）。此时无法分配新行 → 返回 `RESERVATION_FAIL` → **新的 miss 被阻塞**。
+
+**注意**: 这是 openCache 当前实现与 GPGPU-Sim 的一个差异点——openCache 的 `TagArray::probe()` 没有实现 dirty_percentage 过滤和 `all_reserved` 机制。这可能是未来需要对齐的项。
+
+### 1.3 与 Texture Cache 的本质区别
 
 | 维度 | L1D / L2 (baseline_cache 体系) | L1T (tex_cache) |
 |------|-------------------------------|-----------------|
 | 未命中追踪 | MSHR（哈希表，按地址合并） | ROB（FIFO，不合并） |
-| 地址合并 | **是** — 同地址多请求合并到同一 MSHR 条目 | **否** — 每个请求独立 ROB 条目 |
-| 输出顺序 | 无保证（MSHR ready 后即返回） | 严格保证（fragment_fifo + ROB） |
-| 状态机 | CacheBlock 四状态 (I→R→V→M) | data_block 单 bit valid |
-| 写支持 | 是（write-back/through/evict） | 否（READ_ONLY） |
-| 替换策略 | LRU / FIFO（完整） | LRU / FIFO（同机制但预 fill tag） |
+| RESERVED 窗口 | 长（从 access() 到 fill()，可能数十周期） | **0 周期**（access() 内立即 fill()） |
+| all_reserved 触发频率 | 可能（高并发 miss 时） | 几乎不可能 |
+| 地址合并 | **是** — 同地址多请求合并 | **否** — 每个请求独立 |
+| 输出顺序 | 无保证 | 严格保证 |
+| 写支持 | 是 | 否
 
 ---
 
