@@ -1,3 +1,22 @@
+// =============================================================================
+// Ported from GPGPU-Sim (gpgpu-sim_distribution)
+//   gpu-cache.h:125-170  struct cache_block_t       → CacheBlock (abstract)
+//   gpu-cache.h:172-283  struct line_cache_block    → LineCacheBlock
+//   gpu-cache.h:285-512  struct sector_cache_block  → SectorCacheBlock
+//
+// Key modifications:
+//   - Pure abstract base (GPGPU-Sim: non-abstract with bodies)
+//   - Method naming: is_invalid_line()→is_invalid(), print_status()→print()
+//   - get_modified_size() takes sector_size param (GPGPU-Sim: hardcoded SECTOR_SIZE)
+//   - MAX_SECTORS=8 for future expandability (GPGPU-Sim: SECTOR_CHUNCK_SIZE=4)
+//   - allocate_sector() added (ported from gpu-cache.h:360-384)
+//     [v2 fix: preserves other sectors on SECTOR_MISS, Bug 4.1/C]
+//   - Time types: uint64_t (GPGPU-Sim: unsigned / unsigned long long)
+//   - set_byte_mask(mem_fetch*) overload removed (no mem_fetch dependency)
+//   - create_cache_block() factory extracted from tag_array constructor
+//   - Fixed typo: CHUNCK→CHUNK in DEFAULT_SECTOR_CHUNK_SIZE
+// =============================================================================
+
 #ifndef OPEN_CACHE_BLOCK_H
 #define OPEN_CACHE_BLOCK_H
 

@@ -1,3 +1,27 @@
+// =============================================================================
+// Ported from GPGPU-Sim (gpgpu-sim_distribution)
+//   gpu-cache.h:946-1022  class tag_array
+//
+// Key modifications:
+//   - std::vector<CacheBlock*> m_lines (GPGPU-Sim: cache_block_t** raw array)
+//   - TagProbeResult return struct replaces output param unsigned &idx
+//   - probe() / access() / fill() signatures: no mem_fetch* parameter
+//   - find_victim() extracted as independent method (GPGPU-Sim: inline in probe)
+//     [NEW: supports RANDOM and PLRU in addition to LRU/FIFO]
+//   - update_replacement_state() extracted (GPGPU-Sim: scattered calls)
+//   - lru_promote() / fifo_advance() extracted
+//   - find_matching_way() / find_invalid_way() extracted
+//   - m_lru_order / m_fifo_next: explicit replacement state
+//     (GPGPU-Sim: computed on-the-fly in probe())
+//   - inc_dirty() method added (GPGPU-Sim: inlined in gpu-cache.h:997)
+//   - Removed: pending_lines, add_pending_line(), remove_pending_line()
+//     (GPU coalescing feature, not needed for standalone cache)
+//   - Removed: update_cache_parameters() (Volta dynamic associativity)
+//   - Removed: new_window(), windowed_miss_rate() (AerialVision)
+//   - Removed: is_used flag, display_state()
+//   - PLRU implementation is LRU fallback (known issue, audit 5.4)
+// =============================================================================
+
 #ifndef OPEN_CACHE_TAG_ARRAY_H
 #define OPEN_CACHE_TAG_ARRAY_H
 

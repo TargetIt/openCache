@@ -1,3 +1,22 @@
+// =============================================================================
+// Ported from GPGPU-Sim (gpgpu-sim_distribution)
+//   gpu-cache.h:1024-1080  class mshr_table
+//   gpu-cache.cc:569-593   mshr_table::add()
+//   gpu-cache.cc:595-617   mshr_table::mark_ready()
+//   gpu-cache.cc:619-639   mshr_table::display()  → print()
+//
+// Key modifications:
+//   - std::unordered_map replaces tr1_hash_map
+//   - std::vector<CacheRequest> replaces std::list<mem_fetch*>
+//   - add() returns bool (GPGPU-Sim: void, asserts on failure)
+//   - mark_ready() drops has_atomic param (atomic support not yet implemented)
+//   - next_ready() returns all merged requests as vector
+//     (GPGPU-Sim: single mem_fetch* at a time)
+//   - clear() method added (no GPGPU-Sim equivalent)
+//   - Removed: busy(), check_mshr_parameters(), pending_lines
+//   - has_atomic field declared but unused (dead code, audit 5.10)
+// =============================================================================
+
 #ifndef OPEN_CACHE_MSHR_H
 #define OPEN_CACHE_MSHR_H
 

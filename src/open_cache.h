@@ -1,3 +1,32 @@
+// =============================================================================
+// Ported from GPGPU-Sim (gpgpu-sim_distribution)
+//   gpu-cache.h:1261-1278  class cache_t (abstract)       → merged into BaselineCache
+//   gpu-cache.h:1280-1481  class baseline_cache           → BaselineCache
+//   gpu-cache.h:1483-1507  class read_only_cache          → ReadOnlyCache
+//   gpu-cache.h:1509-1700  class data_cache               → DataCache
+//
+// NOT PORTED (GPU-specific):
+//   gpu-cache.h:1702-1726  class l1_cache (derived, only sets wr_alloc/wrbk types)
+//   gpu-cache.h:1728-1749  class l2_cache (same pattern)
+//   gpu-cache.h:1751-1943  class tex_cache (texture pipeline)
+//
+// Key modifications:
+//   - CacheMemoryInterface / SimpleMemory are NEW (no GPGPU-Sim equivalent)
+//     GPGPU-Sim uses mem_fetch_interface from abstract_hardware_model.h
+//   - BaselineCache::m_config stored by value (GPGPU-Sim: by reference)
+//   - ExtraFields keyed by addr_t (mshr_addr), not mem_fetch* pointer
+//     [v2 refactor: proper fill() lookup without pointer dependency]
+//   - ExtraFields::pending_read added for SECTOR_ASSOC tracking
+//     [v2 fix: Bug 4.3 — set to 1 per request, not line_size/sector_size]
+//   - Bandwidth management inlined (GPGPU-Sim: bandwidth_management inner class)
+//   - Function pointer dispatch (WriteHitFn/WriteMissFn/ReadHitFn/ReadMissFn)
+//     Matches GPGPU-Sim's m_wr_hit/m_wr_miss/m_rd_hit/m_rd_miss pattern
+//   - send_write_request() / process_tag_probe() extracted as methods
+//   - wr_hit_global_we_local_wb uses CacheRequest::is_global_access
+//     [v2 fix: Bug 4.5 — replaces GPGPU-Sim's GLOBAL_ACC_W enum check]
+//   - Removed: m_memfetch_creator, m_wr_alloc_type, m_wrbk_type, m_gpu
+// =============================================================================
+
 #ifndef OPEN_CACHE_H
 #define OPEN_CACHE_H
 

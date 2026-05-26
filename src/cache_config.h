@@ -1,3 +1,26 @@
+// =============================================================================
+// Ported from GPGPU-Sim (gpgpu-sim_distribution)
+//   gpu-cache.h:556-905  class cache_config
+//   gpu-cache.h:907-934  class l1d_cache_config  → get_bank_index() merged in
+//   gpu-cache.h:936-944  class l2_cache_config   → NOT PORTED (GPU-specific)
+//   gpu-cache.h:700-713  tag(), block_addr(), mshr_addr()
+//   gpu-cache.h:714-734  set_index(), hash_function()
+//   gpu-cache.cc: —      (config methods inlined in header)
+//
+// Key modifications:
+//   - Member naming: m_nset→num_sets, m_line_sz→line_size, m_assoc→associativity
+//   - parse_config_string() returns bool (GPGPU-Sim: void init() with abort)
+//   - to_config_string() is NEW (serialization, no GPGPU-Sim equivalent)
+//   - compute_derived() extracted from init() body
+//   - Removed: m_config_string storage, m_valid, m_disabled, FuncCache,
+//     m_result_fifo_entries, m_is_streaming, original_m_assoc
+//   - Removed: l1d_cache_config, l2_cache_config derived classes
+//   - hash_addr() inlined (GPGPU-Sim: external hashing.cc)
+//   - get_tag() / get_block_addr() both return addr & ~(line_size-1)
+//     (Same as GPGPU-Sim — confusing API, see audit 5.14)
+//   - Config stored by value (GPGPU-Sim: by reference)
+// =============================================================================
+
 #ifndef OPEN_CACHE_CONFIG_H
 #define OPEN_CACHE_CONFIG_H
 

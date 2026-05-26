@@ -1,3 +1,31 @@
+// =============================================================================
+// Ported from GPGPU-Sim (gpgpu-sim_distribution)
+//   gpu-cache.h:1088-1142  struct cache_sub_stats     → CacheSubStats
+//   gpu-cache.h:1204-1259  class cache_stats          → CacheStats
+//   gpu-cache.cc:642-653   cache_stats::clear()
+//   gpu-cache.cc:662-681   cache_stats::inc_stats()   → record_access()
+//   gpu-cache.cc:704-720   cache_stats::inc_fail_stats() → record_fail()
+//   gpu-cache.cc:722-917   cache_stats::select_stats_status()
+//   gpu-cache.cc:1021-1054 cache_stats::get_sub_stats()
+//   gpu-cache.cc:1134-1151 cache_stats::sample_cache_port_utility()
+//
+// NOT PORTED (GPU-specific):
+//   gpu-cache.h:1144-1202  cache_sub_stats_pw (AerialVision per-window stats)
+//   gpu-cache.cc:655-660   clear_pw()
+//   gpu-cache.cc:683-702   inc_stats_pw()
+//   gpu-cache.cc:1055-1132 get_sub_stats_pw()
+//   operator() indexer, operator+ aggregation
+//
+// Key modifications:
+//   - Single stream only (stream_id=0); GPGPU-Sim multi-stream via std::map
+//   - CacheSubStats adds: read_hits/write_hits/read_misses/write_misses/sector_misses
+//   - CacheSubStats adds: hit_rate(), read_hit_rate(), write_hit_rate()
+//   - record_access() auto-computes read/write hit/miss from AccessType
+//   - m_fail_stats = std::vector<uint64_t>(8, 0)
+//     [v2 fix: was {8,0} causing 2-element vector + heap overflow]
+//   - Removed: per-stream stats, per-window stats, operator overloads
+// =============================================================================
+
 #ifndef OPEN_CACHE_STATS_H
 #define OPEN_CACHE_STATS_H
 

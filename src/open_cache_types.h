@@ -1,3 +1,37 @@
+// =============================================================================
+// Ported from GPGPU-Sim (gpgpu-sim_distribution)
+//   gpu-cache.h:47       enum cache_block_state       → BlockState
+//   gpu-cache.h:49-56    enum cache_request_status     → AccessStatus
+//   gpu-cache.h:59-64    enum cache_reservation_fail   → ReservationFailReason
+//   gpu-cache.h:68-70    enum cache_event_type         → CacheEventType
+//   gpu-cache.h:75-77    enum cache_gpu_level          → CacheLevel (+L3)
+//   gpu-cache.h:82-105   struct evicted_block_info     → EvictedBlockInfo
+//   gpu-cache.h:107-123  struct cache_event            → CacheEvent
+//   gpu-cache.h:514      enum replacement_policy_t     → ReplacementPolicy (+RANDOM,+PLRU)
+//   gpu-cache.h:516-522  enum write_policy_t           → WritePolicy
+//   gpu-cache.h:524      enum allocation_policy_t      → AllocationPolicy (-STREAMING)
+//   gpu-cache.h:526-531  enum write_allocate_policy_t  → WriteAllocatePolicy
+//   gpu-cache.h:533-538  enum mshr_config_t            → MSHRType
+//   gpu-cache.h:540-546  enum set_index_function       → SetIndexFunction (-FERMI_HASH)
+//   gpu-cache.h:548      enum cache_type               → CacheType
+//   gpu-cache.cc:42-55   cache_request_status_str()    → access_status_str()
+//   gpu-cache.cc:515-567 was_write_sent / was_read_sent → inline helpers
+//
+// NEW (no direct GPGPU-Sim equivalent):
+//   AccessType  — replaces mem_access_type from abstract_hardware_model.h
+//   CacheRequest — standalone value type replacing mem_fetch*
+//   CacheResult — return-value wrapper
+//
+// Key modifications:
+//   - C++11 enum class with :uint8_t for type safety
+//   - namespace opencache wrapping
+//   - addr_t = uint64_t instead of new_addr_type
+//   - byte_mask_t / sector_mask_t use std::bitset
+//   - ENRTY→ENTRY spelling fix in ReservationFailReason
+//   - CacheRequest::is_global_access field added for LOCAL_WB_GLOBAL_WT
+//     (Bug 4.5 fix: replaces GPGPU-Sim's GLOBAL_ACC_W enum check)
+// =============================================================================
+
 #ifndef OPEN_CACHE_TYPES_H
 #define OPEN_CACHE_TYPES_H
 

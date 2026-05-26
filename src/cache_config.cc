@@ -1,3 +1,20 @@
+// =============================================================================
+// Ported from GPGPU-Sim (gpgpu-sim_distribution)
+//   gpu-cache.h:568-905  cache_config::init()  → parse_config_string()
+//   gpu-cache.h:714-719  set_index()            → get_set_index()
+//   gpu-cache.h:721-734  hash_function()         → hash_addr()
+//   gpu-cache.cc: —      (originally inlined in header)
+//
+// Key modifications:
+//   - hash_addr() uses inline multiplicative hash (0x85ebca6b, 0xc2b2ae35)
+//     instead of GPGPU-Sim's external hashing.cc functions
+//   - FERMI_HASH_SET_FUNCTION removed ('H' config char not supported)
+//   - Config parser accepts simplified 3-field format (nsets:bsize:assoc)
+//   - 's' (STREAMING) maps to ON_FILL for backward compat
+//   - to_config_string() is NEW
+//   - get_bank_index() is NEW (ported from l1d_cache_config)
+// =============================================================================
+
 #include "cache_config.h"
 #include <cstring>
 #include <cstdio>

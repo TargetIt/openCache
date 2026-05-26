@@ -1,3 +1,31 @@
+// =============================================================================
+// Ported from GPGPU-Sim (gpgpu-sim_distribution)
+//   gpu-cache.cc:205-219  tag_array constructor (init)
+//   gpu-cache.cc:239-334  tag_array::probe()  (2 overloads)
+//   gpu-cache.cc:335-400  tag_array::access() (2 overloads)
+//   gpu-cache.cc:402-448  tag_array::fill()   (3 overloads)
+//   gpu-cache.cc:450-462  tag_array::flush()
+//   gpu-cache.cc:464-483  tag_array::invalidate()
+//   gpu-cache.cc:492-503  tag_array::print()
+//   gpu-cache.cc:505-513  tag_array::get_stats()
+//
+// NOT PORTED (GPU-specific):
+//   gpu-cache.cc:184-203  update_cache_parameters()
+//   gpu-cache.cc:221-237  add_pending_line() / remove_pending_line()
+//   gpu-cache.cc:485-490  new_window()
+//
+// Key modifications:
+//   - SECTOR_MISS in access() calls allocate_sector() preserving other sectors
+//     [v2 fix: Bug 4.2 — per-sector dirty check via get_status(smask)]
+//   - fill() auto-allocates for ON_FILL policy (GPGPU-Sim: separate path)
+//   - flush() / invalidate() iterate per-sector for sector caches
+//     [v2 fix: Bug 4.1 — avoids empty sector_mask crash]
+//   - m_dirty tracking: decrement on dirty eviction, increment on fill→MODIFIED
+//     [v2 fix: Bug 4.2 — per-sector MODIFIED check, not whole-line]
+//   - FIFO advances on access() miss allocation (GPGPU-Sim: same)
+//   - rand() used for RANDOM replacement (GPGPU-Sim: no RANDOM support)
+// =============================================================================
+
 #include "tag_array.h"
 #include <algorithm>
 #include <cstring>
@@ -194,8 +222,10 @@ TagProbeResult TagArray::access(addr_t addr, uint64_t time, bool is_write,
                 result.status = AccessStatus::HIT_RESERVED;
                 return result;
             }
+            // [MODIFIED from GPGPU-Sim gpu-cache.cc:367-384]
             // SECTOR_MISS: line tag matches but this sector is INVALID
             // Allocate just this sector — do NOT reset the whole line
+            // v2 Bug 4.2 fix: check per-sector MODIFIED, not whole-line is_modified()
             m_sector_misses++;
             m_misses++;
             result.status = AccessStatus::SECTOR_MISS;
@@ -299,7 +329,8 @@ void TagArray::fill(addr_t addr, uint64_t time, sector_mask_t mask,
         return;
     }
 
-    // ON_FILL: allocate first, then fill
+    // [MODIFIED from GPGPU-Sim gpu-cache.cc:408-437]
+    // ON_FILL: auto-allocate before fill (GPGPU-Sim does this in a separate code path)
     if (m_config.alloc_policy == AllocationPolicy::ON_FILL) {
         bool wb;
         EvictedBlockInfo evicted;
@@ -314,6 +345,10 @@ void TagArray::fill(addr_t addr, uint64_t time, sector_mask_t mask,
 }
 
 void TagArray::flush() {
+    // [MODIFIED from GPGPU-Sim gpu-cache.cc:450-462]
+    // Original: passes empty sector_mask_t() to set_status() — crashes
+    // sector caches because get_sector_index() asserts count()==1.
+    // Fix: iterate per-sector for sector caches (v2 Bug 4.1)
     if (m_config.cache_type == CacheType::SECTOR) {
         for (auto *line : m_lines) {
             if (line->is_modified()) {

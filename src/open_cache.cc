@@ -1,3 +1,47 @@
+// =============================================================================
+// Ported from GPGPU-Sim (gpgpu-sim_distribution)
+//   gpu-cache.cc:1215-1229  baseline_cache::cycle()
+//   gpu-cache.cc:1231-1282  baseline_cache::fill()
+//   gpu-cache.cc:1341-1400  baseline_cache::send_read_request() (2 overloads)
+//   gpu-cache.cc:1153-1203  bandwidth_management → use_data_port/use_fill_port/replenish_ports
+//   gpu-cache.cc:1883-1927  read_only_cache::access()
+//   gpu-cache.cc:1929-1975  data_cache::process_tag_probe()
+//   gpu-cache.cc:1977-1999  data_cache::access()
+//   gpu-cache.cc:1402-1408  data_cache::send_write_request()
+//   gpu-cache.cc:1431-1448  data_cache::wr_hit_wb()
+//   gpu-cache.cc:1450-1477  data_cache::wr_hit_wt()
+//   gpu-cache.cc:1479-1499  data_cache::wr_hit_we()
+//   gpu-cache.cc:1501-1516  data_cache::wr_hit_global_we_local_wb()
+//   gpu-cache.cc:1518-1598  data_cache::wr_miss_wa_naive()
+//   gpu-cache.cc:1600-1729  data_cache::wr_miss_wa_fetch_on_write()
+//   gpu-cache.cc:1731-1797  data_cache::wr_miss_wa_lazy_fetch_on_read()
+//   gpu-cache.cc:1799-1817  data_cache::wr_miss_no_wa()
+//   gpu-cache.cc:1819-1841  data_cache::rd_hit_base()
+//   gpu-cache.cc:1843-1881  data_cache::rd_miss_base()
+//
+// NOT PORTED (GPU-specific):
+//   gpu-cache.cc:1284-1294  baseline_cache::print/display_state
+//   gpu-cache.cc:1296-1339  inc_aggregated_stats*() (hierarchical aggregation)
+//   gpu-cache.cc:1410-1429  update_m_readable() (inlined into handlers)
+//   gpu-cache.cc:2001-2017  l1_cache::access() / l2_cache::access()
+//   gpu-cache.cc:2021-2164  tex_cache::access() (texture pipeline)
+//
+// Key modifications:
+//   - cycle() drains miss queue [v2 fix: Bug B]
+//   - fill() SECTOR_ASSOC pending_read counting [v2 fix: Bug E]
+//   - send_read_request() uses mshr_addr granularity [v2 fix: Bug D]
+//   - send_read_request() pending_read=1 per request [v2 fix: Bug 4.3]
+//   - All write-miss/read-miss handlers generate writeback on dirty eviction
+//     [v2 fix: Bug A]
+//   - use_data_port() / use_fill_port() actually called [v2 fix: Bug F]
+//   - wr_hit_global_we_local_wb dispatches on is_global_access [v2 fix: Bug 4.5]
+//   - init_function_pointers() extracted from constructor
+//   - process_tag_probe() uses function pointers (matches GPGPU-Sim pattern)
+//   - CacheRequest value semantics (GPGPU-Sim: mem_fetch* pointers)
+//   - ExtraFields keyed by addr_t not mem_fetch*
+//   - Removed: mem_fetch_allocator, wr_alloc_type, wrbk_type, gpgpu_sim*
+// =============================================================================
+
 #include "open_cache.h"
 #include <cassert>
 
@@ -36,7 +80,10 @@ CacheResult BaselineCache::access(const CacheRequest &req) {
 }
 
 void BaselineCache::cycle() {
-    // Drain miss queue: send pending requests to lower level
+    // [MODIFIED from GPGPU-Sim gpu-cache.cc:1215-1229]
+    // v2 Bug B fix: drain miss queue to lower memory each cycle.
+    // GPGPU-Sim: bandwidth_management.replenish + push pending to interconnect.
+    // openCache: directly send from miss_queue via CacheMemoryInterface.
     if (!m_miss_queue.empty()) {
         CacheRequest &req = m_miss_queue.front();
         if (m_memport && m_memport->can_accept_request()) {
@@ -50,7 +97,10 @@ void BaselineCache::cycle() {
 void BaselineCache::fill(const CacheRequest &req, uint64_t time) {
     addr_t mshr_addr = m_config.get_mshr_addr(req.address);
 
-    // SECTOR_ASSOC: track pending sector responses
+    // [MODIFIED from GPGPU-Sim gpu-cache.cc:1231-1250]
+    // SECTOR_ASSOC: track pending sector fill responses.
+    // v2 Bug 4.3 fix: pending_read starts at 1 per request (not line_size/sector_size).
+    // Each fill() decrements; when 0, all sub-responses have arrived and MSHR is ready.
     if (m_config.mshr_type == MSHRType::SECTOR_ASSOC) {
         auto it = m_extra_fields.find(mshr_addr);
         if (it != m_extra_fields.end() && it->second.valid) {
@@ -160,6 +210,10 @@ void BaselineCache::send_read_request(addr_t addr, addr_t block_addr,
     do_miss = true;
     wb = false;
 
+    // [MODIFIED from GPGPU-Sim gpu-cache.cc:1354-1400]
+    // v2 Bug D fix: uses mshr_addr (atom_size granularity) not block_addr.
+    // For sector caches, atom_size=sector_size → MSHR merging at sector level.
+    // For normal caches, atom_size=line_size → MSHR merging at line level.
     addr_t mshr_addr = m_config.get_mshr_addr(addr);
     bool mshr_hit = m_mshrs.probe(mshr_addr);
     bool mshr_avail = !m_mshrs.full(mshr_addr);
@@ -198,6 +252,9 @@ void BaselineCache::send_read_request(addr_t addr, addr_t block_addr,
         ef.address = addr;
         ef.cache_index = alloc.set_index * m_config.associativity + alloc.way_index;
         ef.data_size = req.size;
+        // v2 Bug 4.3: pending_read=1 (one fill per request)
+        // GPGPU-Sim used line_size/sector_size, expecting N sector fills from DRAM.
+        // openCache expects 1 fill response per request from lower level.
         ef.pending_read = (m_config.mshr_type == MSHRType::SECTOR_ASSOC) ? 1 : 0;
         m_extra_fields[mshr_addr] = ef;
 
@@ -450,7 +507,9 @@ CacheResult DataCache::wr_hit_global_we_local_wb(const CacheRequest &req,
                                                    uint32_t way_index,
                                                    uint32_t flat_idx,
                                                    std::vector<CacheEvent> &events) {
-    // GPGPU-Sim Fermi L1: global writes → write-evict, local writes → write-back
+    // [MODIFIED from GPGPU-Sim gpu-cache.cc:1501-1516]
+    // v2 Bug 4.5 fix: GPGPU-Sim checks mf->get_access_type()==GLOBAL_ACC_W.
+    // openCache uses CacheRequest::is_global_access field instead.
     if (req.is_global_access) {
         return wr_hit_we(req, time, set_index, way_index, flat_idx, events);
     } else {
@@ -500,7 +559,10 @@ CacheResult DataCache::wr_miss_wa_naive(const CacheRequest &req, uint64_t time,
     events.push_back(CacheEvent(CacheEventType::WRITE_ALLOCATE_SENT));
 
     if (do_miss) {
-        // Handle writeback from evicted dirty block
+        // [MODIFIED from GPGPU-Sim gpu-cache.cc:1560-1580]
+        // v2 Bug A fix: generate writeback when evicting dirty block.
+        // GPGPU-Sim: m_memfetch_creator->alloc() with chip/partition fixup.
+        // openCache: creates CacheRequest, queues via send_write_request().
         if (wb && m_config.write_policy != WritePolicy::WRITE_THROUGH) {
             CacheRequest wb_req(evicted.block_addr, AccessType::WRITE_BACK,
                                 evicted.modified_size,
