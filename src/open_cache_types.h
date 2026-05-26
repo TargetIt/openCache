@@ -138,9 +138,11 @@ struct CacheRequest {
     uint64_t instruction_id; // for trace ordering
     byte_mask_t byte_mask;   // which bytes in the line are accessed
     sector_mask_t sector_mask; // which sectors are accessed
+    bool is_global_access;   // for LOCAL_WB_GLOBAL_WT: global vs local
 
     CacheRequest() : address(0), type(AccessType::READ), size(4),
-                     stream_id(0), instruction_id(0) {
+                     stream_id(0), instruction_id(0),
+                     is_global_access(true) {
         byte_mask.set();
         sector_mask.set();
     }
@@ -148,7 +150,7 @@ struct CacheRequest {
     CacheRequest(addr_t addr, AccessType t, uint32_t sz = 4,
                  uint32_t sid = 0, uint64_t iid = 0)
         : address(addr), type(t), size(sz), stream_id(sid),
-          instruction_id(iid) {
+          instruction_id(iid), is_global_access(true) {
         byte_mask.set();
         sector_mask.set();
     }

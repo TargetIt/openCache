@@ -198,8 +198,7 @@ void BaselineCache::send_read_request(addr_t addr, addr_t block_addr,
         ef.address = addr;
         ef.cache_index = alloc.set_index * m_config.associativity + alloc.way_index;
         ef.data_size = req.size;
-        ef.pending_read = (m_config.mshr_type == MSHRType::SECTOR_ASSOC)
-                          ? (m_config.line_size / m_config.sector_size) : 0;
+        ef.pending_read = (m_config.mshr_type == MSHRType::SECTOR_ASSOC) ? 1 : 0;
         m_extra_fields[mshr_addr] = ef;
 
         // Push to miss queue for later cycle() drain
@@ -451,9 +450,12 @@ CacheResult DataCache::wr_hit_global_we_local_wb(const CacheRequest &req,
                                                    uint32_t way_index,
                                                    uint32_t flat_idx,
                                                    std::vector<CacheEvent> &events) {
-    // In GPGPU-Sim, GLOBAL_ACC_W triggers write-evict, local triggers write-back.
-    // Since openCache simplifies access types, default to write-back (conservative).
-    return wr_hit_wb(req, time, set_index, way_index, flat_idx, events);
+    // GPGPU-Sim Fermi L1: global writes → write-evict, local writes → write-back
+    if (req.is_global_access) {
+        return wr_hit_we(req, time, set_index, way_index, flat_idx, events);
+    } else {
+        return wr_hit_wb(req, time, set_index, way_index, flat_idx, events);
+    }
 }
 
 // ===== Write-miss handlers =====

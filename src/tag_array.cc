@@ -200,9 +200,10 @@ TagProbeResult TagArray::access(addr_t addr, uint64_t time, bool is_write,
             m_misses++;
             result.status = AccessStatus::SECTOR_MISS;
             if (m_config.alloc_policy == AllocationPolicy::ON_MISS) {
-                bool was_modified = block->is_modified();
+                bool sector_was_modified =
+                    (block->get_status(smask) == BlockState::MODIFIED);
                 static_cast<SectorCacheBlock*>(block)->allocate_sector(time, smask);
-                if (was_modified && !block->is_modified()) m_dirty--;
+                if (sector_was_modified) m_dirty--;
                 if (m_config.replacement_policy == ReplacementPolicy::FIFO) {
                     fifo_advance(result.set_index);
                 }
@@ -313,18 +314,42 @@ void TagArray::fill(addr_t addr, uint64_t time, sector_mask_t mask,
 }
 
 void TagArray::flush() {
-    for (auto *line : m_lines) {
-        if (line->is_modified()) {
-            // Write back dirty data
-            line->set_status(BlockState::INVALID, sector_mask_t());
+    if (m_config.cache_type == CacheType::SECTOR) {
+        for (auto *line : m_lines) {
+            if (line->is_modified()) {
+                for (uint32_t i = 0; i < m_config.sector_chunk_size; ++i) {
+                    sector_mask_t mask;
+                    mask.set(i);
+                    if (line->get_status(mask) == BlockState::MODIFIED) {
+                        line->set_status(BlockState::INVALID, mask);
+                    }
+                }
+            }
+        }
+    } else {
+        for (auto *line : m_lines) {
+            if (line->is_modified()) {
+                line->set_status(BlockState::INVALID, sector_mask_t());
+            }
         }
     }
 }
 
 void TagArray::invalidate() {
-    for (auto *line : m_lines) {
-        line->set_status(BlockState::INVALID, sector_mask_t());
+    if (m_config.cache_type == CacheType::SECTOR) {
+        for (auto *line : m_lines) {
+            for (uint32_t i = 0; i < m_config.sector_chunk_size; ++i) {
+                sector_mask_t mask;
+                mask.set(i);
+                line->set_status(BlockState::INVALID, mask);
+            }
+        }
+    } else {
+        for (auto *line : m_lines) {
+            line->set_status(BlockState::INVALID, sector_mask_t());
+        }
     }
+    m_dirty = 0;
     // Reset LRU/FIFO state
     for (uint32_t s = 0; s < m_config.num_sets; ++s) {
         for (uint32_t w = 0; w < m_config.associativity; ++w) {
