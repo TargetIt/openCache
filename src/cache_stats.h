@@ -123,6 +123,20 @@ public:
         m_fail_stats[static_cast<int>(reason)]++;
     }
 
+    // Select proper stats outcome when probe and access status differ
+    // (e.g. HIT_RESERVED counted differently at cache vs core level)
+    AccessStatus select_stats_status(AccessStatus probe_status,
+                                      AccessStatus access_status) const {
+        if (probe_status == AccessStatus::HIT_RESERVED &&
+            access_status != AccessStatus::RESERVATION_FAIL)
+            return probe_status;
+        else if (probe_status == AccessStatus::SECTOR_MISS &&
+                 access_status == AccessStatus::MISS)
+            return probe_status;
+        else
+            return access_status;
+    }
+
     void sample_port_utility(bool data_port_busy, bool fill_port_busy) {
         auto &st = m_stats[0];
         st.port_available_cycles++;
@@ -154,7 +168,7 @@ public:
 private:
     // stream_id -> stats (default stream 0)
     std::map<uint32_t, CacheSubStats> m_stats;
-    std::vector<uint64_t> m_fail_stats{8, 0};
+    std::vector<uint64_t> m_fail_stats = std::vector<uint64_t>(8, 0);
 };
 
 } // namespace opencache

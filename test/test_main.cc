@@ -192,12 +192,16 @@ TEST(read_only_cache_basic) {
 
     ReadOnlyCache cache("TestRO", config, 0, 0, &mem, CacheLevel::L1);
 
-    // First access: miss
+    // First access: miss (allocated in tag_array, queued in MSHR)
     CacheRequest req1(0x1000, AccessType::READ, 4);
     auto result1 = cache.access(req1);
     ASSERT_EQ((int)result1.status, (int)AccessStatus::MISS);
 
-    // Second access to same address (should have been filled): hit
+    // Cycle to drain miss queue, then fill to mark data valid
+    cache.cycle();
+    cache.fill(req1, 10);
+
+    // Second access to same address (now filled): hit
     CacheRequest req2(0x1000, AccessType::READ, 4);
     auto result2 = cache.access(req2);
     ASSERT_EQ((int)result2.status, (int)AccessStatus::HIT);
@@ -232,15 +236,18 @@ TEST(data_cache_write_back) {
 
 TEST(data_cache_write_through) {
     CacheConfig config(16, 64, 4, ReplacementPolicy::LRU, WritePolicy::WRITE_THROUGH);
+    config.write_alloc_policy = WriteAllocatePolicy::NO_WRITE_ALLOCATE;
     SimpleMemory mem(20);
 
     DataCache cache("TestWT", config, 0, 0, &mem, CacheLevel::L1);
 
-    // Write miss with no write-allocate
+    // Write miss with no write-allocate: should queue write request
     CacheRequest req1(0x1000, AccessType::WRITE, 4);
     auto result1 = cache.access(req1);
     ASSERT_EQ((int)result1.status, (int)AccessStatus::MISS);
-    // Should forward to memory
+
+    // Cycle to drain miss queue → memory gets the write
+    cache.cycle();
     ASSERT_TRUE(mem.get_requests_served() > 0);
 }
 
@@ -460,9 +467,10 @@ TEST(scenario_write_through) {
     for (int i = 0; i < 100; i++) {
         CacheRequest req(i * 64, AccessType::WRITE, 4);
         cache->access(req);
+        cache->cycle(); // drain miss queue each cycle
     }
 
-    // All writes should have been forwarded
+    // All writes should have been forwarded via miss queue
     ASSERT_TRUE(mem.get_requests_served() > 0);
 }
 
@@ -478,6 +486,9 @@ TEST(scenario_write_back_vs_through) {
         CacheRequest req(0x1000, AccessType::WRITE, 4);
         wb_cache->access(req);
         wt_cache->access(req);
+        // Drain miss queues
+        wb_cache->cycle();
+        wt_cache->cycle();
     }
 
     CacheSubStats wb_stats, wt_stats;

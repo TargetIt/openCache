@@ -194,6 +194,21 @@ TagProbeResult TagArray::access(addr_t addr, uint64_t time, bool is_write,
                 result.status = AccessStatus::HIT_RESERVED;
                 return result;
             }
+            // SECTOR_MISS: line tag matches but this sector is INVALID
+            // Allocate just this sector — do NOT reset the whole line
+            m_sector_misses++;
+            m_misses++;
+            result.status = AccessStatus::SECTOR_MISS;
+            if (m_config.alloc_policy == AllocationPolicy::ON_MISS) {
+                bool was_modified = block->is_modified();
+                static_cast<SectorCacheBlock*>(block)->allocate_sector(time, smask);
+                if (was_modified && !block->is_modified()) m_dirty--;
+                if (m_config.replacement_policy == ReplacementPolicy::FIFO) {
+                    fifo_advance(result.set_index);
+                }
+                update_replacement_state(result.set_index, result.way_index, true);
+            }
+            return result;
         } else {
             BlockState line_status = block->get_status(smask);
             if (line_status == BlockState::VALID ||
@@ -232,6 +247,7 @@ TagProbeResult TagArray::access(addr_t addr, uint64_t time, bool is_write,
     // Check if evicting a dirty block (check whole line)
     if (block->is_modified()) {
         wb = true;
+        m_dirty--;
         evicted.block_addr = block->m_block_addr;
         evicted.modified_size = block->get_modified_size(m_config.sector_size);
         evicted.byte_mask = block->get_dirty_byte_mask();
@@ -276,7 +292,23 @@ void TagArray::fill(addr_t addr, uint64_t time, sector_mask_t mask,
     int32_t way = find_matching_way(set_index, tag);
     if (way >= 0) {
         uint32_t idx = get_line_index(set_index, static_cast<uint32_t>(way));
+        bool was_modified = m_lines[idx]->is_modified();
         m_lines[idx]->fill(time, mask, byte_mask);
+        if (m_lines[idx]->is_modified() && !was_modified) m_dirty++;
+        return;
+    }
+
+    // ON_FILL: allocate first, then fill
+    if (m_config.alloc_policy == AllocationPolicy::ON_FILL) {
+        bool wb;
+        EvictedBlockInfo evicted;
+        TagProbeResult alloc = access(addr, time, false, wb, evicted);
+        if (alloc.status != AccessStatus::RESERVATION_FAIL) {
+            uint32_t idx = get_line_index(alloc.set_index, alloc.way_index);
+            bool was_modified = m_lines[idx]->is_modified();
+            m_lines[idx]->fill(time, mask, byte_mask);
+            if (m_lines[idx]->is_modified() && !was_modified) m_dirty++;
+        }
     }
 }
 

@@ -214,6 +214,28 @@ public:
         m_line_fill_time = 0;
     }
 
+    // Allocate a single sector within an already-valid line
+    // (preserves other sectors — unlike allocate() which resets everything)
+    void allocate_sector(uint64_t time, sector_mask_t sector_mask) {
+        assert(is_valid()); // line must already be valid at the line level
+        unsigned sidx = get_sector_index(sector_mask);
+
+        m_alloc_time[sidx] = time;
+        m_last_access_time[sidx] = time;
+        m_fill_time[sidx] = 0;
+        if (m_status[sidx] == BlockState::MODIFIED)
+            m_set_modified_on_fill[sidx] = true;
+        else
+            m_set_modified_on_fill[sidx] = false;
+        m_set_readable_on_fill[sidx] = false;
+        m_status[sidx] = BlockState::RESERVED;
+        m_ignore_on_fill[sidx] = false;
+        m_readable[sidx] = true;
+
+        m_line_last_access_time = time;
+        m_line_fill_time = 0;
+    }
+
     void fill(uint64_t time, sector_mask_t sector_mask,
               byte_mask_t byte_mask) override {
         for (unsigned i = 0; i < m_num_sectors; ++i) {

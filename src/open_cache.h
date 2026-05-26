@@ -85,6 +85,10 @@ public:
     bool data_port_free() const { return m_data_port_available; }
     bool fill_port_free() const { return m_fill_port_available; }
 
+    // Bandwidth management (called on access/fill)
+    void use_data_port(uint32_t data_size, AccessStatus outcome);
+    void use_fill_port(uint32_t atom_size);
+
     // Flush & invalidate
     void flush() { m_tag_array->flush(); }
     void invalidate() { m_tag_array->invalidate(); }
@@ -119,25 +123,34 @@ protected:
     // Miss queue
     std::list<CacheRequest> m_miss_queue;
 
-    // Extra fields for tracking miss info
+    // Extra fields for tracking miss info, keyed by mshr_addr
     struct ExtraFields {
         bool valid = false;
         addr_t block_addr = 0;
-        addr_t address = 0;
+        addr_t address = 0;        // original request address
         uint32_t cache_index = 0;
         uint32_t data_size = 0;
-        uint32_t pending_read = 0;
+        uint32_t pending_read = 0; // for SECTOR_ASSOC: num sectors still pending
     };
-    std::unordered_map<const CacheRequest *, ExtraFields> m_extra_fields;
+    std::unordered_map<addr_t, ExtraFields> m_extra_fields;
 
     void replenish_ports();
     bool miss_queue_full(uint32_t num_miss) const;
 
-    // Send a read request to lower level
+    // Send a read request to lower level (without writeback tracking)
     void send_read_request(addr_t addr, addr_t block_addr,
                            uint32_t cache_index, const CacheRequest &req,
-                           uint64_t time, bool read_only, bool wa,
-                           bool &do_miss, std::vector<CacheEvent> &events);
+                           uint64_t time, bool &do_miss,
+                           std::vector<CacheEvent> &events,
+                           bool read_only, bool wa);
+
+    // Send a read request with writeback tracking (for data cache)
+    void send_read_request(addr_t addr, addr_t block_addr,
+                           uint32_t cache_index, const CacheRequest &req,
+                           uint64_t time, bool &do_miss,
+                           bool &wb, EvictedBlockInfo &evicted,
+                           std::vector<CacheEvent> &events,
+                           bool read_only, bool wa);
 };
 
 
@@ -165,32 +178,77 @@ public:
     CacheResult access(const CacheRequest &req) override;
 
 protected:
-    // Internal access processing
-    CacheResult process_access(const CacheRequest &req, uint64_t time);
+    // Function pointer types for write/read policy dispatch
+    using WriteHitFn = CacheResult (DataCache::*)(
+        const CacheRequest &req, uint64_t time,
+        uint32_t set_index, uint32_t way_index, uint32_t flat_idx,
+        std::vector<CacheEvent> &events);
+    using WriteMissFn = CacheResult (DataCache::*)(
+        const CacheRequest &req, uint64_t time,
+        TagProbeResult &probe, std::vector<CacheEvent> &events);
+    using ReadHitFn = CacheResult (DataCache::*)(
+        const CacheRequest &req, uint64_t time,
+        uint32_t set_index, uint32_t way_index, uint32_t flat_idx,
+        std::vector<CacheEvent> &events);
+    using ReadMissFn = CacheResult (DataCache::*)(
+        const CacheRequest &req, uint64_t time,
+        TagProbeResult &probe, std::vector<CacheEvent> &events);
+
+    WriteHitFn m_wr_hit;
+    WriteMissFn m_wr_miss;
+    ReadHitFn m_rd_hit;
+    ReadMissFn m_rd_miss;
+
+    void init_function_pointers();
+
+    // Process tag probe result through function pointer dispatch
+    CacheResult process_tag_probe(bool is_write, TagProbeResult &probe,
+                                   const CacheRequest &req, uint64_t time,
+                                   std::vector<CacheEvent> &events);
+
+    // Send a write request to lower level (through miss queue)
+    void send_write_request(const CacheRequest &req,
+                            CacheEventType event_type,
+                            std::vector<CacheEvent> &events);
 
     // Write-hit handlers
-    CacheResult write_hit_writeback(const CacheRequest &req, uint64_t time,
-                                     uint32_t set_index, uint32_t way_index,
-                                     uint32_t flat_idx);
-    CacheResult write_hit_writethrough(const CacheRequest &req, uint64_t time,
-                                        uint32_t set_index, uint32_t way_index,
-                                        uint32_t flat_idx);
-    CacheResult write_hit_writeevict(const CacheRequest &req, uint64_t time,
-                                      uint32_t set_index, uint32_t flat_idx);
+    CacheResult wr_hit_wb(const CacheRequest &req, uint64_t time,
+                          uint32_t set_index, uint32_t way_index,
+                          uint32_t flat_idx, std::vector<CacheEvent> &events);
+    CacheResult wr_hit_wt(const CacheRequest &req, uint64_t time,
+                          uint32_t set_index, uint32_t way_index,
+                          uint32_t flat_idx, std::vector<CacheEvent> &events);
+    CacheResult wr_hit_we(const CacheRequest &req, uint64_t time,
+                          uint32_t set_index, uint32_t way_index,
+                          uint32_t flat_idx, std::vector<CacheEvent> &events);
+    CacheResult wr_hit_global_we_local_wb(const CacheRequest &req, uint64_t time,
+                                           uint32_t set_index, uint32_t way_index,
+                                           uint32_t flat_idx,
+                                           std::vector<CacheEvent> &events);
 
     // Write-miss handlers
-    CacheResult write_miss_no_wa(const CacheRequest &req, uint64_t time);
-    CacheResult write_miss_wa_naive(const CacheRequest &req, uint64_t time);
-    CacheResult write_miss_wa_fetch_on_write(const CacheRequest &req, uint64_t time);
-    CacheResult write_miss_wa_lazy_fetch_on_read(const CacheRequest &req, uint64_t time);
+    CacheResult wr_miss_no_wa(const CacheRequest &req, uint64_t time,
+                               TagProbeResult &probe,
+                               std::vector<CacheEvent> &events);
+    CacheResult wr_miss_wa_naive(const CacheRequest &req, uint64_t time,
+                                  TagProbeResult &probe,
+                                  std::vector<CacheEvent> &events);
+    CacheResult wr_miss_wa_fetch_on_write(const CacheRequest &req, uint64_t time,
+                                           TagProbeResult &probe,
+                                           std::vector<CacheEvent> &events);
+    CacheResult wr_miss_wa_lazy_fetch_on_read(const CacheRequest &req, uint64_t time,
+                                               TagProbeResult &probe,
+                                               std::vector<CacheEvent> &events);
 
-    // Read handlers
-    CacheResult read_hit(const CacheRequest &req, uint64_t time,
-                         uint32_t set_index, uint32_t way_index,
-                         uint32_t flat_idx);
-    CacheResult read_miss(const CacheRequest &req, uint64_t time,
-                          TagProbeResult &probe);
+    // Read-hit handler
+    CacheResult rd_hit_base(const CacheRequest &req, uint64_t time,
+                            uint32_t set_index, uint32_t way_index,
+                            uint32_t flat_idx, std::vector<CacheEvent> &events);
 
+    // Read-miss handler
+    CacheResult rd_miss_base(const CacheRequest &req, uint64_t time,
+                             TagProbeResult &probe,
+                             std::vector<CacheEvent> &events);
 };
 
 } // namespace opencache

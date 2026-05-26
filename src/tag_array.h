@@ -56,6 +56,9 @@ public:
     // Update replacement state on access/fill
     void update_replacement_state(uint32_t set_index, uint32_t way_index, bool is_fill);
 
+    // Increment dirty line count
+    void inc_dirty() { m_dirty++; }
+
 private:
     CacheConfig &m_config;
     std::vector<CacheBlock *> m_lines;  // flat array [num_sets * associativity]
