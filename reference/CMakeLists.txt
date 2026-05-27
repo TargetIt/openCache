@@ -6,8 +6,6 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Reference GPGPU-Sim cache library
-# gpu-cache.h and gpu-cache.cc are UNMODIFIED from GPGPU-Sim.
-# Only #include directives were changed to use gpgpu_stubs.h.
 add_library(gpgpu_cache_ref STATIC
     gpgpu_cache/gpu_cache_ref.cc
 )
@@ -16,11 +14,17 @@ target_include_directories(gpgpu_cache_ref PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/gpgpu_cache
 )
 
-# Tests
+# Unit tests
 add_executable(test_gpgpu_cache_ref
     test/test_main.cc
 )
 target_link_libraries(test_gpgpu_cache_ref gpgpu_cache_ref)
+
+# Scenario integration tests
+add_executable(test_scenario
+    test/test_scenario.cc
+)
+target_link_libraries(test_scenario gpgpu_cache_ref)
 
 # Compiler options
 if(MSVC)
@@ -31,3 +35,4 @@ endif()
 
 enable_testing()
 add_test(NAME gpgpu_cache_ref_tests COMMAND test_gpgpu_cache_ref)
+add_test(NAME scenario_tests COMMAND test_scenario)

@@ -4,3 +4,6 @@ build/
 *.o
 *.ilk
 *.pdb
+reference/test_scenario
+reference/test_debug
+reference/test_minimal
