@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cassert>
+#include <cstdint>
 #include <cstring>
 #include <vector>
 #include <list>

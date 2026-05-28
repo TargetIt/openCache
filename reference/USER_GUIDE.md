@@ -40,6 +40,7 @@
      - 3.5.3 [打印内部状态](#353-打印内部状态调试用)
      - 3.5.4 [参数扫描示例](#354-参数扫描示例设计空间探索)
      - 3.5.5 [关键性能指标计算公式](#355-关键性能指标计算公式)
+   - 3.6 [模型边界说明](#36-模型边界说明)
 4. [其他](#4-其他)
    - 4.1 [快速开始](#41-快速开始)
    - 4.2 [附录 A：GPGPU-Sim → openCache 对应关系](#42-附录-agpgpu-sim--opencache-对应关系)
@@ -1477,6 +1478,133 @@ MPKI (Misses Per Kilo) = misses / (accesses / 1000)
 平均命中延迟           = data_size / data_port_width (cycles)
 MLP (Memory-Level Parallelism) ≈ min(MSHR条目数, 实际并行未命中数)
 ```
+
+### 3.6 模型边界说明
+
+本节说明参考实现如何遵循 GPGPU-Sim 的架构设计——将**功能模型**（数据存储）和**时序模型**（缓存状态/延迟）分离。
+
+#### GPGPU-Sim 的双模型架构
+
+原始 GPGPU-Sim 严格分离两个模型：
+
+```
+┌──────────────────────────────────────────────┐
+│  功能模型 (Functional)                        │
+│                                              │
+│  gpgpu_t::m_global_mem  (memory_space)       │
+│  存储实际数据字节                              │
+│  PTX 模拟器在此读写                            │
+└──────────────────┬───────────────────────────┘
+                   │ 创建 mem_fetch 请求令牌
+                   ▼
+┌──────────────────────────────────────────────┐
+│  时序模型 (Timing)                            │
+│                                              │
+│  cache → interconnect → DRAM                 │
+│  只跟踪: 地址 + 状态 + 延迟                    │
+│  不存储: 实际数据字节                          │
+│                                              │
+│  mem_fetch     = 请求令牌 (地址/类型/大小)     │
+│  cache_block_t = tag + state + dirty_mask    │
+│  DRAM model    = 延迟模拟, 不存数据            │
+└──────────────────────────────────────────────┘
+```
+
+**关键设计决策：**
+- `mem_fetch` 是**请求令牌**，不是数据载体。原始 `mem_fetch.h:146` 中 `m_data_size` 的注释是 "how much data is being written"（仅表示大小）
+- `cache_block_t` 只有 `tag + block_addr + state + dirty_mask`，**没有 `uint8_t data[N]`**
+- 数据存储在独立的功能内存空间 (`gpgpu_t::m_global_mem`)，不在 cache 模型内部
+
+#### 本参考实现的架构
+
+遵循 GPGPU-Sim 的分离设计，提供两个独立组件：
+
+| 组件 | 文件 | 角色 | 存储内容 |
+|------|------|------|---------|
+| **Cache Model** | `gpu_cache_ref.h/cc` | 时序模型 — tag 匹配 + 状态流转 + MSHR + 带宽管理 | tag + state + dirty_mask |
+| **DataStore** | `data_store.h` | 功能模型 — 独立的数据存储 | 实际数据字节 (`std::map<addr, vector<uint8_t>>`) |
+| **mem_fetch** | `gpgpu_stubs.h` | 请求令牌 — 在 pipeline 中流动 | 地址 + 类型 + 大小 + 掩码（无数据） |
+
+#### DataStore 接口
+
+```cpp
+class DataStore {
+    void write(block_addr, data, size);  // 存储数据
+    vector<uint8_t> read(block_addr, size);  // 读取数据
+    bool contains(block_addr);  // 是否已存储
+    void clear();  // 清空
+};
+```
+
+每级缓存独立维护一个 DataStore 实例：
+- `DataStore l1_data` — L1 缓存对应的数据
+- `DataStore l2_data` — L2 缓存对应的数据
+- `DataStore dram_data` — DRAM 中的数据（预先填充）
+
+#### 数据通路（GPGPU-Sim 分离模式）
+
+```
+读请求:
+  1. SM 创建 mem_fetch 令牌 (地址/大小/类型, 无数据)
+  2. L1.access(mf) → tag_array::probe()
+     ├── HIT  → 从 l1_data.read(addr) 获取数据 (功能)
+     └── MISS → MSHR 分配 → miss_queue → L2.access()
+          ├── HIT  → l2_data→l1_data 拷贝数据 (功能) + L1.fill() (时序)
+          └── MISS → dram_data→l2_data→l1_data 拷贝 (功能) + L2/L1.fill() (时序)
+  3. L1.next_access() → 请求完成
+
+写请求:
+  1. SM 创建 mem_fetch 令牌 + 写入数据
+  2. L1.access(mf) → tag_array::probe()
+     ├── HIT  → l1_data.write(addr, data) (功能) + 标记 MODIFIED (时序)
+     └── MISS → (取决于写分配策略) 可能分配行 + l1_data.write()
+  3. 驱逐时: l1_data→l2_data 拷贝脏数据 (功能) + send_write_request (时序)
+```
+
+#### 使用示例
+
+```cpp
+#include "data_store.h"
+#include "gpu_cache_ref.h"
+
+// 1. 功能模型: 创建独立的数据存储
+DataStore l1_data, dram_data;
+
+// 2. 预先在 DRAM 中放入数据 (模拟程序加载)
+uint8_t init[64] = {...};
+dram_data.write(0x1000, init, 64);
+
+// 3. 时序模型: 创建缓存 (只管理 tag + 状态 + 延迟)
+read_only_cache l1("L1D", cfg, 0, 0, &dram_if, ...);
+
+// 4. 访问数据
+mem_fetch *mf = make_read_request(0x1010, 4);
+auto status = l1.access(mf->get_addr(), mf, cycle, events);
+
+if (status == HIT) {
+    auto data = l1_data.read(block_addr, 4);  // 功能: 从 L1 DataStore 读取
+}
+// MISS 时: 从 dram_data 拷贝到 l1_data (功能), 然后 l1.fill() (时序)
+```
+
+完整示例见 `memory_system.h`（`SimpleTwoLevel` 类）和 `test/test_scenario.cc`（`scenario_10_data_store_dual_model`）。
+
+#### 能力边界
+
+| 能力 | 支持情况 | 说明 |
+|------|---------|------|
+| 命中/未命中决策 | 支持 | tag_array::probe() 完整实现 |
+| 状态机流转 | 支持 | INVALID→RESERVED→VALID→MODIFIED |
+| MSHR 未命中跟踪 | 支持 | 全相联 + sector 两种模式 |
+| 带宽/端口建模 | 支持 | data_port / fill_port 占用周期跟踪 |
+| 替换策略 | 支持 | LRU / FIFO |
+| 写策略派发 | 支持 | 4 种写命中 × 4 种写未命中策略 |
+| 数据内容存储 | **DataStore 分离** | `data_store.h`, 每级独立实例 |
+| 数据内容验证 | **DataStore 分离** | 可直接读写 DataStore, 与 cache 状态对比 |
+| 缓存一致性协议 | 不支持 | 无 snoop/目录协议 |
+| 预取 | 不支持 | 可通过外部逻辑配合 access() 实现 |
+| 功耗建模 | 不支持 | 提供访问计数, 需外部功耗模型 |
+| ECC / 纠错码 | 不支持 | 不涉及可靠性建模 |
 
 ---
 
