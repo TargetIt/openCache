@@ -8,17 +8,285 @@
 
 1. [接口说明](#1-接口说明)
    - 1.1 [配置接口](#11-配置接口)
+     - 1.1.1 [cache_config 数据结构](#111-cache_config-数据结构)
+     - 1.1.2 [配置字符串格式](#112-配置字符串格式gpgu-sim-兼容)
+     - 1.1.3 [参数化配置](#113-参数化配置代码直接赋值)
+     - 1.1.4 [Throughput 和 Latency 的配置方式](#114-throughput-和-latency-的配置方式)
+     - 1.1.5 [常用配置示例](#115-常用配置示例)
    - 1.2 [数据接口](#12-数据接口)
+     - 1.2.1 [请求接口：access()](#121-请求接口access)
+     - 1.2.2 [请求数据结构](#122-请求数据结构)
+     - 1.2.3 [从下级 Memory 抓数据的请求接口](#123-从下级-memory-抓数据的请求接口mem_fetch_interface)
+     - 1.2.4 [下级 Memory 返回给 Cache 的数据接口：fill()](#124-下级-memory-返回给-cache-的数据接口fill)
+     - 1.2.5 [Invalidate / Flush 接口](#125-invalidate--flush-接口)
+     - 1.2.6 [带宽/端口查询接口](#126-带宽端口查询接口)
+     - 1.2.7 [读取就绪请求：access_ready() / next_access()](#127-读取就绪请求access_ready--next_access)
    - 1.3 [调度接口](#13-调度接口)
+     - 1.3.1 [主程序的调用接口：构造函数](#131-主程序的调用接口构造函数)
+     - 1.3.2 [如何推进时钟：cycle()](#132-如何推进时钟cycle)
+     - 1.3.3 [调度接口总览：核心模拟循环](#133-调度接口总览核心模拟循环)
 2. [使用示例](#2-使用示例)
 3. [架构总览](#3-架构总览)
+   - 3.1 [类层次结构](#31-类层次结构)
+   - 3.2 [数据处理流程](#32-数据处理流程)
+     - 3.2.1 [请求处理流程](#321-请求处理流程核心数据通路)
+     - 3.2.2 [写策略派发流程](#322-写策略派发流程data_cache-特有)
+     - 3.2.3 [多级缓存数据流](#323-多级缓存数据流l1--l2--dram)
+   - 3.3 [模块化结构](#33-模块化结构)
+   - 3.4 [用户使用典型场景推荐](#34-用户使用典型场景推荐)
+   - 3.5 [可维可测说明](#35-可维可测说明)
+     - 3.5.1 [获取统计数据](#351-获取统计数据)
+     - 3.5.2 [统计项含义](#352-统计项含义)
+     - 3.5.3 [打印内部状态](#353-打印内部状态调试用)
+     - 3.5.4 [参数扫描示例](#354-参数扫描示例设计空间探索)
+     - 3.5.5 [关键性能指标计算公式](#355-关键性能指标计算公式)
 4. [其他](#4-其他)
+   - 4.1 [快速开始](#41-快速开始)
+   - 4.2 [附录 A：GPGPU-Sim → openCache 对应关系](#42-附录-agpgpu-sim--opencache-对应关系)
+   - 4.3 [附录 B：缓存类型对比](#43-附录-b缓存类型对比)
+   - 4.4 [附录 C：Normal vs Sector 缓存](#44-附录-cnormal-vs-sector-缓存)
+   - 4.5 [附录 D：写策略选择指南](#45-附录-d写策略选择指南)
+   - 4.6 [附录 E：文件结构](#46-附录-e文件结构)
+   - 4.7 [附录 F：MSHR 系统详解](#47-附录-fmshr-系统详解)
 
 ---
 
 ## 1. 接口说明
 
 本章按接口类型分为三部分：**配置接口**（如何参数化缓存模型）、**数据接口**（如何发起/接收请求和处理数据）、**调度接口**（如何驱动缓存推进时钟）。
+
+#### 接口全景图
+
+以下思维导图展示了缓存模型的全部对外接口及其层次关系。用户集成时只需关注这三个入口：
+
+```
+缓存模型对外接口
+│
+├── 1. 配置接口 ─── cache_config
+│   │
+│   ├── 构造方式
+│   │   ├── 配置字符串 (GPGPU-Sim 兼容): "S:32:128:4,L:E:m:F:X,A:32:4,64"
+│   │   └── 代码直接赋值: cfg.m_nset = 32; cfg.m_line_sz = 128; ...
+│   │
+│   ├── 几何参数
+│   │   ├── m_cache_type        → NORMAL / SECTOR          (缓存粒度)
+│   │   ├── m_nset              → unsigned                  (Set 数量)
+│   │   ├── m_line_sz           → unsigned                  (行大小, Bytes)
+│   │   └── m_assoc            → unsigned                  (关联度)
+│   │
+│   ├── 时序/吞吐量参数
+│   │   ├── m_data_port_width   → unsigned (B/cycle)        (命中延迟 & 带宽)
+│   │   ├── m_mshr_entries      → unsigned                  (最大并行未命中数 MLP)
+│   │   ├── m_mshr_max_merge    → unsigned                  (同地址最大合并数)
+│   │   └── m_miss_queue_size   → unsigned                  (未命中缓冲深度)
+│   │
+│   └── 策略参数
+│       ├── m_write_policy      → READ_ONLY / WRITE_BACK / WRITE_THROUGH
+│       │                         / WRITE_EVICT / LOCAL_WB_GLOBAL_WT
+│       ├── m_write_alloc_policy → NO_WRITE_ALLOCATE / WRITE_ALLOCATE
+│       │                          / FETCH_ON_WRITE / LAZY_FETCH_ON_READ
+│       ├── m_alloc_policy      → ON_MISS / ON_FILL / STREAMING
+│       ├── m_replacement_policy → LRU / FIFO
+│       ├── m_set_index_function → LINEAR / BITWISE_XOR / HASH_IPOLY / FERMI_HASH / CUSTOM
+│       ├── m_mshr_type         → ASSOC / SECTOR_ASSOC / TEX_FIFO / SECTOR_TEX_FIFO
+│       └── m_wr_percent        → unsigned (0-100)           (脏行保护阈值)
+│
+├── 2. 数据接口 ─── 请求的发送、传输与返回
+│   │
+│   ├── (A) 请求入口 ─── access(addr, mf, time, events) → cache_request_status
+│   │   │
+│   │   ├── 参数-1: addr : new_addr_type (= unsigned long long)
+│   │   │           │
+│   │   │           ├── 全地址: 0x00001040  (byte 粒度)
+│   │   │           ├── block_addr() = addr & ~(line_sz-1) → 0x00001000  (cache line 对齐)
+│   │   │           ├── tag()       = block_addr                       (用于 tag_array 匹配)
+│   │   │           ├── mshr_addr() = addr & ~(atom_sz-1)              (MSHR 粒度对齐)
+│   │   │           └── set_index() = hash_function(addr)              (映射到目标 set)
+│   │   │
+│   │   ├── 参数-2: mf : mem_fetch*  (请求载体, 缓存系统的核心数据结构)
+│   │   │           │
+│   │   │           ├── 构造函数: mem_fetch(access, inst, streamID, ctrl_size,
+│   │   │           │                      wid, sid, tpc, mem_config, cycle, orig, orig_wr)
+│   │   │           │
+│   │   │           ├── 访问器 (由 cache 代码调用)
+│   │   │           │   ├── get_addr()               → new_addr_type            (请求地址)
+│   │   │           │   ├── get_data_size()           → unsigned                 (数据大小, Bytes)
+│   │   │           │   ├── is_write()                → bool                     (是否写请求)
+│   │   │           │   ├── get_is_write()            → bool                     (同 is_write)
+│   │   │           │   ├── get_access_type()         → mem_access_type          (访问类型枚举)
+│   │   │           │   ├── get_access_byte_mask()    → mem_access_byte_mask_t   (有效字节位掩码)
+│   │   │           │   ├── get_access_sector_mask()  → mem_access_sector_mask_t (有效 sector 掩码)
+│   │   │           │   ├── get_access_warp_mask()    → active_mask_t            (活跃线程掩码)
+│   │   │           │   ├── get_streamID()            → unsigned long long       (CUDA Stream ID)
+│   │   │           │   ├── get_wid()                 → unsigned                 (warp ID)
+│   │   │           │   ├── get_sid()                 → unsigned                 (shader core ID)
+│   │   │           │   ├── get_tpc()                 → unsigned                 (TPC ID)
+│   │   │           │   ├── get_status()              → mem_fetch_status         (当前队列状态)
+│   │   │           │   ├── get_tlx_addr()            → tlx_addr                 (chip/partition)
+│   │   │           │   └── get_inst()                → warp_inst_t&             (关联指令)
+│   │   │           │
+│   │   │           ├── 修改器 (由 cache 内部使用)
+│   │   │           │   ├── set_addr(new_addr_type)                        (改写地址)
+│   │   │           │   ├── set_data_size(unsigned)                        (改写大小)
+│   │   │           │   ├── set_status(mem_fetch_status, cycle)            (更新队列状态)
+│   │   │           │   ├── set_chip(unsigned)                             (设定 chip)
+│   │   │           │   ├── set_partition(unsigned)                        (设定 partition)
+│   │   │           │   └── set_reply()                                    (标记回复)
+│   │   │           │
+│   │   │           ├── 内部数据: mem_access_t m_access
+│   │   │           │   ├── m_type        → mem_access_type  (GLOBAL_ACC_R/W, LOCAL_ACC_R/W,
+│   │   │           │   │                                    CONST_ACC_R, TEXTURE_ACC_R,
+│   │   │           │   │                                    INST_ACC_R, L1_WRBK_ACC,
+│   │   │           │   │                                    L2_WRBK_ACC, L1_WR_ALLOC_R,
+│   │   │           │   │                                    L2_WR_ALLOC_R)
+│   │   │           │   ├── m_addr        → new_addr_type    (请求地址)
+│   │   │           │   ├── m_size        → unsigned         (请求大小, Bytes)
+│   │   │           │   ├── m_is_write    → bool             (读/写标志)
+│   │   │           │   ├── m_access_mask → active_mask_t    (bitset<64>, 活跃线程位掩码)
+│   │   │           │   ├── m_byte_mask   → mem_access_byte_mask_t  (bitset<128>, 有效字节)
+│   │   │           │   └── m_sector_mask → mem_access_sector_mask_t(bitset<4>,  有效 sector)
+│   │   │           │
+│   │   │           └── 分配器: mem_fetch_allocator (抽象接口, 用户实现)
+│   │   │               ├── alloc(addr, type, size, wr, cycle, streamID) → mem_fetch*
+│   │   │               └── alloc(addr, type, mask, byte_mask, sector_mask,
+│   │   │                          size, wr, cycle, wid, sid, tpc, orig, streamID) → mem_fetch*
+│   │   │
+│   │   ├── 参数-3: time : unsigned  (当前时钟周期)
+│   │   │           │
+│   │   │           └── 用途: 更新 cache_block_t.m_last_access_time (LRU 排序依据)
+│   │   │                     记录 m_alloc_time (FIFO 排序依据)
+│   │   │                     传递给 MSHR 和 miss_queue 的上报函数
+│   │   │
+│   │   ├── 参数-4: events : std::list<cache_event>&  [出参]
+│   │   │           │
+│   │   │           └── cache_event 结构
+│   │   │               ├── m_cache_event_type : enum cache_event_type
+│   │   │               │   ├── WRITE_BACK_REQUEST_SENT    (驱逐脏行产生的写回)
+│   │   │               │   ├── READ_REQUEST_SENT          (未命中产生的读请求)
+│   │   │               │   ├── WRITE_REQUEST_SENT         (写穿透产生的写请求)
+│   │   │               │   └── WRITE_ALLOCATE_SENT        (写分配产生的分配请求)
+│   │   │               │
+│   │   │               └── m_evicted_block : evicted_block_info  (仅写回事件有效)
+│   │   │                   ├── m_block_addr    → new_addr_type              (被驱逐块地址)
+│   │   │                   ├── m_modified_size → unsigned                   (脏数据大小)
+│   │   │                   ├── m_byte_mask     → mem_access_byte_mask_t     (脏字节掩码)
+│   │   │                   └── m_sector_mask   → mem_access_sector_mask_t   (脏 sector 掩码)
+│   │   │
+│   │   │   辅助函数:
+│   │   │     was_write_sent(events)          → bool  (是否包含 WRITE_BACK/WRITE 事件)
+│   │   │     was_read_sent(events)           → bool  (是否包含 READ_REQUEST 事件)
+│   │   │     was_writeallocate_sent(events)  → bool  (是否包含 WRITE_ALLOCATE 事件)
+│   │   │
+│   │   └── 返回值: cache_request_status (7 种状态)
+│   │       ├── HIT              → 命中, 数据立即可用, 延迟 = ceil(data_size/data_port_width)
+│   │       ├── HIT_RESERVED     → 命中但行处于 RESERVED 状态 (尚未 fill 完成)
+│   │       ├── MISS             → 未命中, tag_array 已分配行 + MSHR 已分配条目
+│   │       ├── SECTOR_MISS      → Sector 缓存: 该 sector 未命中, 行有效但 sector 需 fill
+│   │       ├── MSHR_HIT         → 同地址已有未完成 MSHR 条目, 请求已合并到该条目
+│   │       └── RESERVATION_FAIL → 无法接受请求, 原因见 cache_reservation_fail_reason:
+│   │           ├── LINE_ALLOC_FAIL     (所有行都被 RESERVED, 无可替换行)
+│   │           ├── MISS_QUEUE_FULL     (miss_queue 已满)
+│   │           ├── MSHR_ENRTY_FAIL     (MSHR 无空闲条目)
+│   │           ├── MSHR_MERGE_ENRTY_FAIL (MSHR 合并条目已满)
+│   │           └── MSHR_RW_PENDING     (该地址有 pending read-after-write)
+│   │
+│   ├── (B) 下级通信接口 ─── mem_fetch_interface (抽象接口, 用户实现)
+│   │   │
+│   │   ├── 接口定义
+│   │   │   ├── virtual full(size, write) → bool
+│   │   │   │   ├── 参数: size    : unsigned  (请求数据大小, Bytes)
+│   │   │   │   ├── 参数: write   : bool      (是否写请求)
+│   │   │   │   └── 返回: true 表示下级队列已满, 需反压暂停发送
+│   │   │   │
+│   │   │   └── virtual push(mf) → void
+│   │   │       ├── 参数: mf : mem_fetch*  (待发送的请求, 所有权转移给下级)
+│   │   │       └── 语义: 将 mf 推入下级存储队列, cache 不再保留引用
+│   │   │
+│   │   ├── 测试桩: simple_mem_interface : public mem_fetch_interface
+│   │   │   ├── 构造: simple_mem_interface(max_size=256)
+│   │   │   │   └── max_queue_size : unsigned  (FIFO 队列最大深度)
+│   │   │   │
+│   │   │   ├── 内部: std::list<mem_fetch*> queue  (FIFO 队列, 存储待处理请求)
+│   │   │   │
+│   │   │   ├── full(size, write) → bool
+│   │   │   │   └── 实现: return queue.size() >= max_queue_size
+│   │   │   │
+│   │   │   └── push(mf) → void
+│   │   │       └── 实现: queue.push_back(mf)
+│   │   │
+│   │   └── 适配器模式示例: CacheMemAdapter : public mem_fetch_interface
+│   │       ├── 用途: 将 L2 (cache_t) 包装为 mem_fetch_interface,
+│   │       │         使 L1 可直接将 L2 作为下级存储连接
+│   │       ├── 构造: CacheMemAdapter(read_only_cache* downstream)
+│   │       ├── full(size, write) → incoming.size() >= 64
+│   │       ├── push(mf)          → incoming.push_back(mf)
+│   │       └── drain_to_cache(cycle) → 将 incoming 队列逐个送入 downstream->access()
+│   │
+│   ├── (C) 下级返回接口 ─── fill(mf, time)
+│   │   │
+│   │   ├── 签名: void baseline_cache::fill(mem_fetch *mf, unsigned time)
+│   │   │
+│   │   ├── 参数: mf   : mem_fetch*  (下级存储返回的请求, 数据已就绪)
+│   │   ├── 参数: time : unsigned    (当前时钟周期)
+│   │   │
+│   │   ├── 内部行为:
+│   │   │   1. 提取 mf 的 block_addr + sector_mask
+│   │   │   2. 调用 tag_array::fill() → 将对应行状态从 RESERVED 更新为 VALID/MODIFIED
+│   │   │   3. 调用 mshr_table::mark_ready() → MSHR 中标记该地址就绪
+│   │   │   4. 上层通过 access_ready()/next_access() 感知完成
+│   │   │
+│   │   └── 调用时机: 下级存储处理完请求后, 由模拟主循环调用
+│   │       for each cycle:
+│   │         while (dram.queue 有响应):
+│   │           resp = dram.queue.pop_front()
+│   │           cache.fill(resp, cycle)
+│   │
+│   ├── (D) 就绪读取接口 ─── access_ready() / next_access()
+│   │   │
+│   │   ├── access_ready() → bool
+│   │   │   └── 实现: return m_mshrs.access_ready()  (MSHR 内部 m_current_response 非空)
+│   │   │
+│   │   └── next_access() → mem_fetch*
+│   │       └── 实现: return m_mshrs.next_access()   (弹出 MSHR 队列中下一个完成的请求)
+│   │
+│   ├── (E) 控制接口 ─── flush() / invalidate()
+│   │   │
+│   │   ├── flush()      → 遍历所有行: MODIFIED → 写回下级 → 标记 INVALID
+│   │   └── invalidate() → 遍历所有行: 直接标记 INVALID (不写回, 丢弃脏数据)
+│   │
+│   └── (F) 带宽查询接口 ─── data_port_free() / fill_port_free()
+│       │
+│       ├── data_port_free() → bool
+│       │   └── 实现: return bandwidth_management::data_port_free()
+│       │            (m_data_port_occupied_cycles == 0)
+│       │
+│       └── fill_port_free() → bool
+│           └── 实现: return bandwidth_management::fill_port_free()
+│                    (m_fill_port_occupied_cycles == 0)
+│
+└── 3. 调度接口 ─── 创建实例 + 驱动时钟
+    │
+    ├── 缓存构造函数 (6 种缓存类型)
+    │   ├── baseline_cache(name, config, core_id, type_id, memport, status, level, gpu)
+    │   ├── read_only_cache(name, config, core_id, type_id, memport, status, level, gpu)
+    │   ├── data_cache(name, config, core_id, type_id, memport, mfcreator,
+    │   │               status, wr_alloc_type, wrbk_type, gpu, level)
+    │   ├── l1_cache(name, config, core_id, type_id, memport, mfcreator, status, gpu, level)
+    │   ├── l2_cache(name, config, core_id, type_id, memport, mfcreator, status, gpu, level)
+    │   └── tex_cache(name, config, core_id, type_id, memport, request_status, rob_status)
+    │
+    ├── cycle() ─── 将 miss_queue 中请求发送到下级, 释放端口配额
+    │
+    └── 主循环范式 (所有接口的调用序列)
+        for each cycle:
+          1. access()  → 发送请求, 检查返回状态
+          2. cycle()   → 推进时钟, miss→下级
+          3. fill()    → 下级数据返回, 注入缓存
+          4. access_ready()/next_access() → 取出完成请求
+          5. get_sub_stats() → 周期结束或批量获取统计
+```
+
+> 上图即完整接口清单。以下三节逐一对配置接口、数据接口、调度接口展开详述。
 
 ### 1.1 配置接口
 
