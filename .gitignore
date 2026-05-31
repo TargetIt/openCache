@@ -7,3 +7,10 @@ build/
 reference/test_scenario
 reference/test_debug
 reference/test_minimal
+gem5_cache/test_gem5_cache_ref
+gem5_cache/test_gem5_cache_ref.dSYM/
+gem5_cache/test_scenario
+gem5_cache/test_scenario.dSYM/
+gem5_cache/build/
+gem5_cache/test_gpgpu_cache_ref
+gem5_cache/test_gpgpu_cache_ref.dSYM/
