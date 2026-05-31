@@ -1,0 +1,3 @@
+#ifndef __BASE_UNCONTENDED_MUTEX_HH__
+#define __BASE_UNCONTENDED_MUTEX_HH__
+#endif
