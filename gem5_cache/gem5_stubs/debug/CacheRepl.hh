@@ -1,8 +1,7 @@
-#ifndef __DEBUG_DEBUGFLAG_HH__
-#define __DEBUG_DEBUGFLAG_HH__
+#ifndef __DEBUG_CacheRepl_HH__
+#define __DEBUG_CacheRepl_HH__
 namespace gem5 { namespace debug {
-class SimpleCacheRepl { public: static bool is_on() { return false; } };
+struct DebugFlag_CacheRepl { bool flag = false; static bool is_on() { return false; } operator bool() const { return flag; } };
+extern DebugFlag_CacheRepl CacheRepl;
 } }
-#define DebugCacheRepl(name) extern gem5::debug::SimpleCacheRepl name
-DebugCacheRepl(CacheRepl);
 #endif

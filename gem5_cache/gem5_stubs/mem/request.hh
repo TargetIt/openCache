@@ -4,6 +4,7 @@
 #include <memory>
 #include "base/types.hh"
 #include "base/context_switch_task_id.hh"
+#include "base/flags.hh"
 
 namespace gem5 {
 
@@ -13,8 +14,8 @@ typedef uint32_t RequestorID;
 
 class Request {
   public:
-    typedef uint32_t FlagsType;
-    typedef FlagsType Flags;
+    typedef uint64_t FlagsType;
+    typedef gem5::Flags<FlagsType> Flags;
     static const FlagsType INST_FETCH = 0x1;
     static const FlagsType NO_ALLOCATE = 0x2;
     static const FlagsType STRICT_ORDER = 0x4;
@@ -43,7 +44,7 @@ class Request {
     bool isSecure() const { return false; }
     bool isInstFetch() const { return false; }
     void setFlags(FlagsType) {}
-    FlagsType getFlags() const { return 0; }
+    const Flags& getFlags() const { return _reqFlags; }
     bool isRead() const { return true; }
     bool isWrite() const { return false; }
     bool hasContextId() const { return false; }
@@ -70,6 +71,7 @@ class Request {
     unsigned _size = 0;
     unsigned _taskId = 0;
     RequestorID _requestorId = 0;
+    Flags _reqFlags;
 };
 
 }

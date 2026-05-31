@@ -1,8 +1,7 @@
-#ifndef __DEBUG_DEBUGFLAG_HH__
-#define __DEBUG_DEBUGFLAG_HH__
+#ifndef __DEBUG_HWPrefetchQueue_HH__
+#define __DEBUG_HWPrefetchQueue_HH__
 namespace gem5 { namespace debug {
-class SimpleHWPrefetchQueue { public: static bool is_on() { return false; } };
+struct DebugFlag_HWPrefetchQueue { bool flag = false; static bool is_on() { return false; } operator bool() const { return flag; } };
+extern DebugFlag_HWPrefetchQueue HWPrefetchQueue;
 } }
-#define DebugHWPrefetchQueue(name) extern gem5::debug::SimpleHWPrefetchQueue name
-DebugHWPrefetchQueue(HWPrefetchQueue);
 #endif

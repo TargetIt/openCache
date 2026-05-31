@@ -1,8 +1,7 @@
-#ifndef __DEBUG_DEBUGFLAG_HH__
-#define __DEBUG_DEBUGFLAG_HH__
+#ifndef __DEBUG_CacheVerbose_HH__
+#define __DEBUG_CacheVerbose_HH__
 namespace gem5 { namespace debug {
-class SimpleCacheVerbose { public: static bool is_on() { return false; } };
+struct DebugFlag_CacheVerbose { bool flag = false; static bool is_on() { return false; } operator bool() const { return flag; } };
+extern DebugFlag_CacheVerbose CacheVerbose;
 } }
-#define DebugCacheVerbose(name) extern gem5::debug::SimpleCacheVerbose name
-DebugCacheVerbose(CacheVerbose);
 #endif

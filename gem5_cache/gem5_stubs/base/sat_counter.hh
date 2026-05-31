@@ -1,52 +1,134 @@
 #ifndef __BASE_SAT_COUNTER_HH__
 #define __BASE_SAT_COUNTER_HH__
+
+#include <cassert>
 #include <cstdint>
-#include <memory>
-namespace gem5 {
+#include <cstdlib>
 
-template <int BITS> class SatCounter {
-    uint8_t val = 0;
+namespace gem5
+{
+
+/**
+ * Implements an n bit saturating counter.
+ * Matches the gem5 GenericSatCounter<T> interface.
+ */
+template <class T>
+class GenericSatCounter
+{
   public:
-    SatCounter() {}
-    SatCounter(uint8_t v) : val(v) {}
-    SatCounter& operator++() { if (val < ((1<<BITS)-1)) val++; return *this; }
-    SatCounter& operator++(int) { return ++(*this); }
-    SatCounter& operator--() { if (val > 0) val--; return *this; }
-    SatCounter& operator--(int) { return --(*this); }
-    void reset() { val = 0; }
-    void reset(uint8_t v) { val = v; }
-    SatCounter& operator>>=(int shift) { val >>= shift; return *this; }
-    SatCounter& operator=(uint8_t v) { val = v; return *this; }
-    operator uint8_t() const { return val; }
-    uint8_t saturation() const { return val; }
+    /** No default construction — must specify bit width. */
+    GenericSatCounter() = delete;
+
+    explicit GenericSatCounter(unsigned bits, T initial_val = 0)
+        : initialVal(initial_val), maxVal((1ULL << bits) - 1),
+          counter(initial_val)
+    {
+    }
+
+    GenericSatCounter(const GenericSatCounter& other)
+        : initialVal(other.initialVal), maxVal(other.maxVal),
+          counter(other.counter) {}
+
+    GenericSatCounter& operator=(const GenericSatCounter& other) {
+        if (this != &other) {
+            initialVal = other.initialVal;
+            maxVal = other.maxVal;
+            counter = other.counter;
+        }
+        return *this;
+    }
+
+    GenericSatCounter(GenericSatCounter&& other)
+        : initialVal(other.initialVal), maxVal(other.maxVal),
+          counter(other.counter)
+    {
+        other.counter = 0;
+    }
+
+    GenericSatCounter& operator=(GenericSatCounter&& other) {
+        if (this != &other) {
+            initialVal = other.initialVal;
+            maxVal = other.maxVal;
+            counter = other.counter;
+            other.counter = 0;
+        }
+        return *this;
+    }
+
+    GenericSatCounter& operator++() {
+        if (counter < maxVal) ++counter;
+        return *this;
+    }
+    GenericSatCounter operator++(int) {
+        GenericSatCounter old = *this;
+        ++*this;
+        return old;
+    }
+    GenericSatCounter& operator--() {
+        if (counter > 0) --counter;
+        return *this;
+    }
+    GenericSatCounter operator--(int) {
+        GenericSatCounter old = *this;
+        --*this;
+        return old;
+    }
+
+    GenericSatCounter& operator>>=(const int& shift) {
+        counter >>= shift;
+        return *this;
+    }
+    GenericSatCounter& operator<<=(const int& shift) {
+        counter <<= shift;
+        if (counter > maxVal) counter = maxVal;
+        return *this;
+    }
+
+    GenericSatCounter& operator+=(const long long& value) {
+        if (value >= 0) {
+            if ((T)(maxVal - counter) >= (T)value) counter += (T)value;
+            else counter = maxVal;
+        } else {
+            *this -= -value;
+        }
+        return *this;
+    }
+    GenericSatCounter& operator-=(const long long& value) {
+        if (value >= 0) {
+            if (counter > (T)value) counter -= (T)value;
+            else counter = 0;
+        } else {
+            *this += -value;
+        }
+        return *this;
+    }
+
+    operator T() const { return counter; }
+
+    void reset() { counter = initialVal; }
+    void reset(T v) { initialVal = v; counter = v; }
+
+    double calcSaturation() const { return maxVal > 0 ? (double)counter / maxVal : 0.0; }
+
+    bool isSaturated() const { return counter == maxVal; }
+
+    T saturate() {
+        T diff = maxVal - counter;
+        counter = maxVal;
+        return diff;
+    }
+
+  private:
+    T initialVal = 0;
+    T maxVal = 0;
+    T counter = 0;
 };
 
-typedef SatCounter<3> SatCounter8;
-typedef SatCounter<4> SatCounter16;
-typedef SatCounter<5> SatCounter32;
+typedef GenericSatCounter<uint8_t>  SatCounter8;
+typedef GenericSatCounter<uint16_t> SatCounter16;
+typedef GenericSatCounter<uint32_t> SatCounter32;
+typedef GenericSatCounter<uint64_t> SatCounter64;
 
-// Backward compatibility aliases
-template <int BITS> using SatCounter8_t = SatCounter<BITS>;
+} // namespace gem5
 
-// Saturating counter standalone
-template <int BITS> class sat_counter {
-    uint32_t val = 0;
-  public:
-    sat_counter() {}
-    sat_counter(uint32_t v) : val(v) {}
-    sat_counter& operator++() { if (val < ((1U<<BITS)-1)) val++; return *this; }
-    sat_counter& operator--() { if (val > 0) val--; return *this; }
-    void reset() { val = (1U << BITS) >> 1; }
-    void reset(uint32_t v) { val = v; }
-    sat_counter& operator>>=(int shift) { val >>= shift; return *this; }
-    sat_counter& operator=(uint32_t v) { val = v; return *this; }
-    operator uint32_t() const { return val; }
-    uint32_t calcSaturation() const { return val; }
-};
-
-// Functions for sat_counter
-template <int BITS>
-uint32_t saturate(sat_counter<BITS> &c) { return c.calcSaturation(); }
-
-}
-#endif
+#endif // __BASE_SAT_COUNTER_HH__
