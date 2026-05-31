@@ -120,11 +120,11 @@ simulation — it's the most widely used and validated cache model in academia.
 | Tag storage | base.cc, base_set_assoc.cc, fa_lru.cc, sector_tags.cc, sector_blk.cc, super_blk.cc, compressed_tags.cc | Compiles |
 | Replacement policies | lru_rp.cc, fifo_rp.cc, mru_rp.cc, random_rp.cc, tree_plru_rp.cc | Compiles |
 | Replacement policies | bip_rp.cc, brrip_rp.cc, lfu_rp.cc, dueling_rp.cc | Compiles |
-| Replacement policies | second_chance_rp.cc, weighted_lru_rp.cc, ship_rp.cc | Limited* |
+| Replacement policies | second_chance_rp.cc, weighted_lru_rp.cc, ship_rp.cc | Compiles |
 | Indexing policies | set_associative.cc, skewed_associative.cc | Compiles |
+| Dueling | tags/dueling.cc | Compiles |
 
-*Limited: compiles with syntax check but has deep template dependency issues.
-These 4 files represent ~5% of the total codebase.
+**All 30 source files compile and 13/13 tests pass.**
 
 ## Test Coverage (13 tests)
 
