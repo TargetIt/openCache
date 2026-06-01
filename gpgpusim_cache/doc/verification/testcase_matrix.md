@@ -8,6 +8,7 @@
 | TC-CFG-002 | F-CFG-002 | unit | Implemented | `test/test_main.cc` | `none` 配置禁用 |
 | TC-CFG-003 | F-CFG-003 | unit | Implemented | `test/test_cache_whitebox.cc` | NORMAL/SECTOR atom size 正确 |
 | TC-CFG-004 | F-CFG-005 | unit | Implemented | `test/test_cache_whitebox.cc` | STREAMING 转 ON_FILL 且 `is_streaming()` |
+| TC-DEATH-001 | F-CFG-010 | death | Implemented | `test/test_death.cc` | 非法配置/assert 路径在子进程中异常退出，主回归不中断 |
 | TC-ADDR-001 | F-CFG-009 | unit | Implemented | `test/test_cache_whitebox.cc` | LINEAR/XOR/IPOLY/FERMI/CUSTOM set-index 在范围内，并校验选定地址 golden 值 |
 | TC-ADDR-002 | F-ADDR-001 | unit | Implemented | `test/test_cache_whitebox.cc` | block/tag/mshr 地址按 line/sector 对齐 |
 | TC-ADDR-003 | F-ADDR-002 | unit | Implemented | `test/test_cache_whitebox.cc` | 边界地址映射不越界 |
@@ -25,7 +26,7 @@
 | TC-MSHR-004 | F-MSHR-004 | unit | Implemented | `test/test_cache_whitebox.cc` | merged ready FIFO 顺序 |
 | TC-MSHR-005 | F-MSHR-005 | unit | Implemented | `test/test_cache_whitebox.cc` | RAW pending 检测 |
 | TC-RO-001 | F-RO-001 | unit | Implemented | `test/test_cache_whitebox.cc` | read_only miss/cycle/fill/ready |
-| TC-RO-002 | F-RO-002 | unit | Partial | `test/test_cache_whitebox.cc` | backpressure 行为覆盖；fail reason 精确查询后续补充 |
+| TC-RO-002 | F-RO-002 | unit | Implemented | `test/test_cache_whitebox.cc` | miss queue full backpressure，并精确查询 MISS_QUEUE_FULL |
 | TC-DC-001 | F-DC-001 | unit | Implemented | `test/test_cache_whitebox.cc` | data_cache read miss/hit |
 | TC-WR-001 | F-WR-001 | unit | Implemented | `test/test_cache_whitebox.cc` | WB hit 不产生 lower write |
 | TC-WR-002 | F-WR-002 | unit | Implemented | `test/test_cache_whitebox.cc` | WT hit 产生 WRITE_REQUEST_SENT |
@@ -42,13 +43,13 @@
 | TC-TEX-003 | F-TEX-003 | unit | Implemented | `test/test_cache_whitebox.cc` | texture FIFO/ROB 满 backpressure |
 | TC-BW-001 | F-BW-001 | unit | Implemented | `test/test_cache_whitebox.cc` | data/fill port free 状态变化 |
 | TC-STATS-001 | F-STATS-001 | unit | Implemented | `test/test_main.cc` | cache_sub_stats 汇总 |
-| TC-STATS-002 | F-STATS-002 | unit | Partial | `test/test_cache_whitebox.cc` | res_fails 汇总覆盖；具体 fail reason 查询后续补充 |
+| TC-STATS-002 | F-STATS-002 | unit | Implemented | `test/test_cache_whitebox.cc` | LINE_ALLOC_FAIL、MISS_QUEUE_FULL、MSHR_ENTRY、MSHR_MERGE、MSHR_RW_PENDING 精确查询 |
 | TC-STATS-003 | F-STATS-003, F-TAG-006 | unit | Implemented | `test/test_cache_whitebox.cc` | window/per-window stats |
 | TC-FUNC-001 | F-FUNC-001 | unit | Implemented | `test/test_cache_whitebox.cc` | DataStore 默认零、write/read、同 block partial write preserve |
 | TC-FUNC-002 | F-FUNC-002 | scenario | Implemented | `test/test_scenario.cc` | dual model 数据一致 |
 | TC-PROP-001 | F-PROP-001 | property | Implemented | `test/test_cache_whitebox.cc` | fixed seed trace 不变量 |
-| TC-REG-001 | F-REG-001 | regression | Implemented | `run.sh` | 一键回归全部通过 |
-| TC-COV-001 | F-COV-001 | coverage | Implemented | `coverage.sh` | 生成覆盖率报告；当前 line 64.41%、function 67.83%、branch 54.36% |
+| TC-REG-001 | F-REG-001 | regression | Implemented | `run.sh` | 一键回归 unit/scenario/whitebox/death 全部通过 |
+| TC-COV-001 | F-COV-001 | coverage | Implemented | `coverage.sh` | 生成覆盖率报告；当前 line 64.89%、function 68.08%、branch 54.47%；death 子进程 abort 路径不计入 coverage |
 
 ## 多角色检视记录
 
@@ -57,4 +58,4 @@
 | step0 验证方案 | 通过，要求覆盖写策略和 sector/texture | 通过，要求区分用户场景与白盒 | 通过，要求先修测试框架假通过 | 通过，要求 requirements 追踪 |
 | step1 feature | 通过，feature 覆盖主要接口和状态机 | 通过，建议后续补 death tests | 通过，要求每条反标 testcase | 通过，要求 planned 不得冒充 implemented |
 | step2 testcase | 通过，覆盖架构风险点 | 通过，测试分层明确 | 通过，要求默认回归全部可执行 | 通过，要求 run.sh 和 coverage.sh 纳入交付 |
-| step3-step7 | 通过，新增白盒覆盖关键架构风险；覆盖率需后续继续提升 | 通过，run.sh/CMake/coverage.sh 均纳入 | 通过，默认回归 13+10+12 全通过 | 通过，文档和追踪矩阵已刷新 |
+| step3-step7 | 通过，新增白盒和 death 覆盖关键架构风险；覆盖率需后续继续提升 | 通过，run.sh/CMake/coverage.sh 均纳入 | 通过，默认回归 13+10+13+6 全通过 | 通过，文档和追踪矩阵已刷新 |

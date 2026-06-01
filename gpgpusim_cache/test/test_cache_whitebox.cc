@@ -341,8 +341,78 @@ TEST(read_only_flow_and_fail_stats)
     mem_fetch *fail = new_mf(0x2000, 4, false, GLOBAL_ACC_R);
     events.clear();
     CHECK_EQ(fail_cache.access(fail->get_addr(), fail, 4, events), MISS);
+    mem_fetch *miss_queue_full = new_mf(0x2040, 4, false, GLOBAL_ACC_R);
+    CHECK_EQ(fail_cache.access(miss_queue_full->get_addr(), miss_queue_full, 5,
+                               events),
+             RESERVATION_FAIL);
+    CHECK_EQ(fail_cache.get_fail_stats(GLOBAL_ACC_R, MISS_QUEUE_FULL), 1ull);
     fail_cache.cycle();
     CHECK_EQ(small_mem.queue.size(), 0u);
+}
+
+TEST(fail_reason_counters)
+{
+    simple_mf_allocator allocator;
+    gpgpu_sim gpu;
+    std::list<cache_event> events;
+
+    {
+        simple_mem_interface mem(64);
+        cache_config cfg = make_config("N:1:64:1,L:B:m:F:L,A:4:2,8");
+        l1_cache cache("LineAllocFail", cfg, 0, 0, &mem, &allocator,
+                       IN_L1D_MISS_QUEUE, &gpu, L1_GPU_CACHE);
+        mem_fetch *first = new_mf(0x0000, 4, false, GLOBAL_ACC_R);
+        CHECK_EQ(cache.access(first->get_addr(), first, 1, events), MISS);
+        events.clear();
+        mem_fetch *conflict = new_mf(0x0040, 4, false, GLOBAL_ACC_R);
+        CHECK_EQ(cache.access(conflict->get_addr(), conflict, 2, events),
+                 RESERVATION_FAIL);
+        CHECK_EQ(cache.get_fail_stats(GLOBAL_ACC_R, LINE_ALLOC_FAIL), 1ull);
+    }
+
+    {
+        simple_mem_interface mem(64);
+        cache_config cfg = make_config("N:4:64:4,L:B:m:F:L,A:1:4,8");
+        l1_cache cache("MshrEntryFail", cfg, 0, 0, &mem, &allocator,
+                       IN_L1D_MISS_QUEUE, &gpu, L1_GPU_CACHE);
+        events.clear();
+        mem_fetch *first = new_mf(0x0000, 4, false, GLOBAL_ACC_R);
+        CHECK_EQ(cache.access(first->get_addr(), first, 1, events), MISS);
+        events.clear();
+        mem_fetch *second = new_mf(0x0040, 4, false, GLOBAL_ACC_R);
+        CHECK_EQ(cache.access(second->get_addr(), second, 2, events),
+                 RESERVATION_FAIL);
+        CHECK_EQ(cache.get_fail_stats(GLOBAL_ACC_R, MSHR_ENRTY_FAIL), 1ull);
+    }
+
+    {
+        simple_mem_interface mem(64);
+        cache_config cfg = make_config("N:4:64:4,L:B:m:F:L,A:1:1,8");
+        l1_cache cache("MshrMergeFail", cfg, 0, 0, &mem, &allocator,
+                       IN_L1D_MISS_QUEUE, &gpu, L1_GPU_CACHE);
+        events.clear();
+        mem_fetch *first = new_mf(0x1000, 4, false, GLOBAL_ACC_R);
+        CHECK_EQ(cache.access(first->get_addr(), first, 1, events), MISS);
+        events.clear();
+        mem_fetch *merged = new_mf(0x1004, 4, false, GLOBAL_ACC_R);
+        CHECK_EQ(cache.access(merged->get_addr(), merged, 2, events),
+                 RESERVATION_FAIL);
+        CHECK_EQ(cache.get_fail_stats(GLOBAL_ACC_R, MSHR_MERGE_ENRTY_FAIL),
+                 1ull);
+    }
+
+    cache_stats stats;
+    stats.clear();
+    stats.inc_fail_stats(GLOBAL_ACC_R, LINE_ALLOC_FAIL, 0);
+    stats.inc_fail_stats(GLOBAL_ACC_R, MISS_QUEUE_FULL, 0);
+    stats.inc_fail_stats(GLOBAL_ACC_R, MSHR_ENRTY_FAIL, 0);
+    stats.inc_fail_stats(GLOBAL_ACC_R, MSHR_MERGE_ENRTY_FAIL, 0);
+    stats.inc_fail_stats(GLOBAL_ACC_W, MSHR_RW_PENDING, 0);
+    CHECK_EQ(stats.get_fail_stats(GLOBAL_ACC_R, LINE_ALLOC_FAIL), 1ull);
+    CHECK_EQ(stats.get_fail_stats(GLOBAL_ACC_R, MISS_QUEUE_FULL), 1ull);
+    CHECK_EQ(stats.get_fail_stats(GLOBAL_ACC_R, MSHR_ENRTY_FAIL), 1ull);
+    CHECK_EQ(stats.get_fail_stats(GLOBAL_ACC_R, MSHR_MERGE_ENRTY_FAIL), 1ull);
+    CHECK_EQ(stats.get_fail_stats(GLOBAL_ACC_W, MSHR_RW_PENDING), 1ull);
 }
 
 TEST(data_cache_read_and_write_policies)
@@ -683,6 +753,7 @@ int main()
     RUN_TEST(tag_on_fill_all_reserved);
     RUN_TEST(mshr_capacity_order_raw);
     RUN_TEST(read_only_flow_and_fail_stats);
+    RUN_TEST(fail_reason_counters);
     RUN_TEST(data_cache_read_and_write_policies);
     RUN_TEST(write_miss_events_and_writeback);
     RUN_TEST(texture_pipeline_and_backpressure);

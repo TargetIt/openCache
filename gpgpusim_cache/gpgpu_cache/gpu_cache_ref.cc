@@ -1018,6 +1018,20 @@ unsigned long long cache_stats::get_stats(
   return total;
 }
 
+unsigned long long cache_stats::get_fail_stats(
+    enum mem_access_type access_type,
+    enum cache_reservation_fail_reason fail) const {
+  if (!check_fail_valid((int)access_type, (int)fail))
+    assert(0 && "Unknown cache access type or fail outcome");
+
+  unsigned long long total = 0;
+  for (auto iter = m_fail_stats.begin(); iter != m_fail_stats.end(); ++iter) {
+    unsigned long long streamID = iter->first;
+    total += m_fail_stats.at(streamID)[access_type][fail];
+  }
+  return total;
+}
+
 void cache_stats::get_sub_stats(struct cache_sub_stats &css) const {
   ///
   /// Overwrites "css" with the appropriate statistics from this cache.

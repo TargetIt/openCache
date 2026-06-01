@@ -37,7 +37,7 @@
 1. Directed whitebox tests：对每个状态机和策略路径构造精确输入，断言返回状态、事件、统计和内部 block 状态。
 2. Scenario integration tests：保留用户视角的 L1/L2、multi-L1 shared L2、DataStore 双模型示例，但强化断言。
 3. Property tests：固定 seed 生成地址和读写序列，校验不变量，例如稳定复现、访问数统计、miss+hit 分类一致。
-4. Negative/death tests：对非法配置和 assert 路径单独规划；当前阶段先文档化，不放入默认回归，避免默认回归因 abort 中断。
+4. Negative/death tests：对非法配置和 assert 路径使用子进程隔离，纳入默认回归，避免 abort 中断主测试进程。
 5. Regression script：默认一键跑全部非 death 测试；覆盖率脚本在工具可用时生成报告。
 
 ## 多角色检视结论
@@ -64,12 +64,12 @@
 
 | 指标 | 覆盖率 |
 |------|--------|
-| Region | 50.38% |
-| Function | 67.83% |
-| Line | 64.41% |
-| Branch | 54.36% |
+| Region | 50.40% |
+| Function | 68.08% |
+| Line | 64.89% |
+| Branch | 54.47% |
 
-当前覆盖率未达到长期目标。原因是本阶段优先补齐默认回归、白盒关键路径、feature/testcase 追踪和覆盖率基础设施；death tests、非法配置矩阵、更多 sector/texture backpressure、更多 hash golden 地址和随机 differential 长跑仍需后续迭代。覆盖率报告由 `gpgpusim_cache/coverage.sh` 生成，提交中固化的基线见 `coverage_baseline.md`。
+当前覆盖率未达到长期目标。原因是本阶段优先补齐默认回归、白盒关键路径、feature/testcase 追踪、death test 和覆盖率基础设施；更多 sector/texture backpressure、更多 hash golden 地址和随机 differential 长跑仍需后续迭代。覆盖率报告由 `gpgpusim_cache/coverage.sh` 生成，提交中固化的基线见 `coverage_baseline.md`。death tests 通过子进程验证 abort/assert 路径，默认不计入 coverage，以避免 abort profile 造成覆盖率文件不稳定。
 
 ## 迭代准则
 

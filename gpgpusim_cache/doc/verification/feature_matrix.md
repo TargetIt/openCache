@@ -13,6 +13,7 @@
 | F-CFG-007 | write allocate policy | 白盒 | N/W/F/L 四种策略 | TC-WR-004, TC-WR-005, TC-WR-007, TC-WR-009 |
 | F-CFG-008 | MSHR type | 白盒 | ASSOC、SECTOR_ASSOC、TEX_FIFO、SECTOR_TEX_FIFO | TC-MSHR-001, TC-TEX-001 |
 | F-CFG-009 | set index function | 白盒 | LINEAR、XOR、IPOLY、FERMI、CUSTOM 范围、基本差异和选定地址 golden 值 | TC-ADDR-001 |
+| F-CFG-010 | illegal config/assert path | 异常 | parse error、sector line size、writeback/on-fill、lazy/on-fill、port width、Fermi nset | TC-DEATH-001 |
 | F-ADDR-001 | block/tag/mshr 地址对齐 | 接口 | line、sector atom、tag 等式 | TC-ADDR-002 |
 | F-ADDR-002 | 边界地址 | 接口 | 0、line 末尾、跨 line、较大地址 | TC-ADDR-003 |
 | F-BLK-001 | line block 生命周期 | 白盒 | INVALID->RESERVED->VALID->MODIFIED->INVALID | TC-TAG-001, TC-TAG-002 |
@@ -46,7 +47,7 @@
 | F-TEX-003 | texture backpressure | 异常 | fifo/ROB full -> RESERVATION_FAIL | TC-TEX-003 |
 | F-BW-001 | data/fill port | 性能 | port occupied/free | TC-BW-001 |
 | F-STATS-001 | cache stats 基础 | 统计 | accesses/misses/pending/res fails | TC-STATS-001 |
-| F-STATS-002 | fail stats | 统计 | reservation fail reason | TC-STATS-002 |
+| F-STATS-002 | fail stats | 统计 | reservation fail reason 精确查询 | TC-STATS-002 |
 | F-STATS-003 | per-window stats | 统计 | clear_pw/get_sub_stats_pw | TC-STATS-003 |
 | F-FUNC-001 | DataStore read/write | functional | zero default、partial write preserve | TC-FUNC-001 |
 | F-FUNC-002 | timing/functional 双模型 | 用户场景 | miss fill copies data, hit reads L1 | TC-FUNC-002 |

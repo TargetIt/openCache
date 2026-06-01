@@ -20,5 +20,7 @@ gpgpusim_cache/test_scenario
 gpgpusim_cache/test_scenario.dSYM/
 gpgpusim_cache/test_cache_whitebox
 gpgpusim_cache/test_cache_whitebox.dSYM/
+gpgpusim_cache/test_death
+gpgpusim_cache/test_death.dSYM/
 gpgpusim_cache/coverage/
 gpgpusim_cache/build/

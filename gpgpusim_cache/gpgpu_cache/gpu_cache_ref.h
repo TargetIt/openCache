@@ -1235,6 +1235,8 @@ class cache_stats {
                                unsigned num_access_type,
                                enum cache_request_status *access_status,
                                unsigned num_access_status) const;
+  unsigned long long get_fail_stats(enum mem_access_type access_type,
+                                    enum cache_reservation_fail_reason fail) const;
   void get_sub_stats(struct cache_sub_stats &css) const;
 
   // Get per-window cache stats for AerialVision
@@ -1340,6 +1342,11 @@ class baseline_cache : public cache_t {
                      unsigned num_access_status) const {
     return m_stats.get_stats(access_type, num_access_type, access_status,
                              num_access_status);
+  }
+  unsigned long long get_fail_stats(
+      enum mem_access_type access_type,
+      enum cache_reservation_fail_reason fail) const {
+    return m_stats.get_fail_stats(access_type, fail);
   }
   void get_sub_stats(struct cache_sub_stats &css) const {
     m_stats.get_sub_stats(css);
