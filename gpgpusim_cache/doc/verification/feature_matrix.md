@@ -11,7 +11,7 @@
 | F-CFG-005 | allocation policy | 白盒 | ON_MISS、ON_FILL、STREAMING | TC-CFG-004, TC-TAG-006 |
 | F-CFG-006 | write policy | 白盒 | WB、WT、WE、LOCAL_WB_GLOBAL_WT | TC-WR-001, TC-WR-002, TC-WR-003, TC-WR-008 |
 | F-CFG-007 | write allocate policy | 白盒 | N/W/F/L 四种策略 | TC-WR-004, TC-WR-005, TC-WR-007, TC-WR-009 |
-| F-CFG-008 | MSHR type | 白盒 | ASSOC、SECTOR_ASSOC、TEX_FIFO、SECTOR_TEX_FIFO | TC-MSHR-001, TC-TEX-001 |
+| F-CFG-008 | MSHR type | 白盒 | ASSOC、SECTOR_ASSOC、TEX_FIFO、SECTOR_TEX_FIFO | TC-MSHR-001, TC-MSHR-006, TC-TEX-001, TC-TEX-004 |
 | F-CFG-009 | set index function | 白盒 | LINEAR、XOR、IPOLY、FERMI、CUSTOM 范围、基本差异、边界/高位地址 golden 值 | TC-ADDR-001 |
 | F-CFG-010 | illegal config/assert path | 异常 | parse error、sector line size、writeback/on-fill、lazy/on-fill、port width、Fermi nset | TC-DEATH-001 |
 | F-ADDR-001 | block/tag/mshr 地址对齐 | 接口 | line、sector atom、tag 等式 | TC-ADDR-002 |

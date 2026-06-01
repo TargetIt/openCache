@@ -682,6 +682,55 @@ TEST(sector_dirty_masks_and_writeback)
     CHECK_FALSE(wb.m_evicted_block.m_sector_mask.test(3));
 }
 
+TEST(sector_assoc_pending_read_fill)
+{
+    simple_mem_interface mem(64);
+    simple_mf_allocator allocator;
+    gpgpu_sim gpu;
+    cache_config cfg = make_config("S:4:128:4,L:B:m:N:L,S:4:2,8");
+    l1_cache cache("SectorAssocPending", cfg, 0, 0, &mem, &allocator,
+                   IN_L1D_MISS_QUEUE, &gpu, L1_GPU_CACHE);
+    std::list<cache_event> events;
+    mem_fetch *read = new_mf(0x6008, 4, false, GLOBAL_ACC_R, 1,
+                             sector_mask(0), byte_mask_range(8, 4));
+
+    CHECK_EQ(cache.access(read->get_addr(), read, 1, events), MISS);
+    CHECK_TRUE(has_event(events, READ_REQUEST_SENT));
+    CHECK_EQ(read->get_addr(), 0x6000ull);
+    CHECK_EQ(read->get_data_size(), (unsigned)SECTOR_SIZE);
+    cache.cycle();
+    CHECK_EQ(mem.queue.size(), 1u);
+    CHECK_TRUE(mem.queue.front() == read);
+    mem.queue.pop_front();
+
+    for (unsigned sector = 0; sector < 3; ++sector) {
+        mem_fetch *partial_resp = new_child_mf(0x6000 + sector * SECTOR_SIZE,
+                                               SECTOR_SIZE, false,
+                                               GLOBAL_ACC_R, read, 2 + sector,
+                                               sector_mask(sector),
+                                               byte_mask_range(sector * SECTOR_SIZE,
+                                                               SECTOR_SIZE));
+        cache.fill(partial_resp, 2 + sector);
+        CHECK_FALSE(cache.access_ready());
+    }
+
+    mem_fetch *final_resp = new_child_mf(0x6000 + 3 * SECTOR_SIZE, SECTOR_SIZE,
+                                         false, GLOBAL_ACC_R, read, 5,
+                                         sector_mask(3),
+                                         byte_mask_range(3 * SECTOR_SIZE,
+                                                         SECTOR_SIZE));
+    cache.fill(final_resp, 5);
+    CHECK_TRUE(cache.access_ready());
+    CHECK_TRUE(cache.next_access() == read);
+    CHECK_EQ(read->get_addr(), 0x6008ull);
+    CHECK_EQ(read->get_data_size(), 4u);
+
+    events.clear();
+    mem_fetch *hit = new_mf(0x6008, 4, false, GLOBAL_ACC_R, 6,
+                            sector_mask(0), byte_mask_range(8, 4));
+    CHECK_EQ(cache.access(hit->get_addr(), hit, 6, events), HIT);
+}
+
 TEST(texture_pipeline_and_backpressure)
 {
     simple_mem_interface mem(64);
@@ -985,6 +1034,7 @@ int main()
     RUN_TEST(data_cache_read_and_write_policies);
     RUN_TEST(write_miss_events_and_writeback);
     RUN_TEST(sector_dirty_masks_and_writeback);
+    RUN_TEST(sector_assoc_pending_read_fill);
     RUN_TEST(texture_pipeline_and_backpressure);
     RUN_TEST(texture_sector_pending_and_return_order);
     RUN_TEST(stats_datastore_property_trace);
