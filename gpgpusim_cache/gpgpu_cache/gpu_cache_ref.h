@@ -123,6 +123,7 @@ struct cache_event {
 };
 
 const char *cache_request_status_str(enum cache_request_status status);
+const char *cache_fail_status_str(enum cache_reservation_fail_reason status);
 
 struct cache_block_t {
   cache_block_t() {

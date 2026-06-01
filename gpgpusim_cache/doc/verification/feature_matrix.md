@@ -49,6 +49,7 @@
 | F-STATS-001 | cache stats 基础 | 统计 | accesses/misses/pending/res fails | TC-STATS-001 |
 | F-STATS-002 | fail stats | 统计 | reservation fail reason 精确查询 | TC-STATS-002 |
 | F-STATS-003 | per-window stats | 统计 | clear_pw/get_sub_stats_pw | TC-STATS-003 |
+| F-STATS-004 | status string tables | 诊断 | request/fail status 字符串映射 | TC-STATS-004 |
 | F-FUNC-001 | DataStore read/write | functional | zero default、partial write preserve | TC-FUNC-001 |
 | F-FUNC-002 | timing/functional 双模型 | 用户场景 | miss fill copies data, hit reads L1 | TC-FUNC-002 |
 | F-PROP-001 | deterministic trace | 随机/回归 | fixed seed 和多 seed 稳定、不变量 | TC-PROP-001, TC-PROP-002 |

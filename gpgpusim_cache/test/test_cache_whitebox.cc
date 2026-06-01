@@ -175,6 +175,33 @@ TEST(config_sector_and_streaming)
     CHECK_TRUE(streaming.is_streaming());
 }
 
+TEST(status_string_tables)
+{
+    CHECK_EQ(strcmp(cache_request_status_str(HIT), "HIT"), 0);
+    CHECK_EQ(strcmp(cache_request_status_str(HIT_RESERVED), "HIT_RESERVED"), 0);
+    CHECK_EQ(strcmp(cache_request_status_str(MISS), "MISS"), 0);
+    CHECK_EQ(strcmp(cache_request_status_str(RESERVATION_FAIL),
+                    "RESERVATION_FAIL"),
+             0);
+    CHECK_EQ(strcmp(cache_request_status_str(SECTOR_MISS), "SECTOR_MISS"), 0);
+    CHECK_EQ(strcmp(cache_request_status_str(MSHR_HIT), "MSHR_HIT"), 0);
+
+    CHECK_EQ(strcmp(cache_fail_status_str(LINE_ALLOC_FAIL),
+                    "LINE_ALLOC_FAIL"),
+             0);
+    CHECK_EQ(strcmp(cache_fail_status_str(MISS_QUEUE_FULL), "MISS_QUEUE_FULL"),
+             0);
+    CHECK_EQ(strcmp(cache_fail_status_str(MSHR_ENRTY_FAIL),
+                    "MSHR_ENRTY_FAIL"),
+             0);
+    CHECK_EQ(strcmp(cache_fail_status_str(MSHR_MERGE_ENRTY_FAIL),
+                    "MSHR_MERGE_ENRTY_FAIL"),
+             0);
+    CHECK_EQ(strcmp(cache_fail_status_str(MSHR_RW_PENDING),
+                    "MSHR_RW_PENDING"),
+             0);
+}
+
 TEST(address_mapping_boundaries)
 {
     cache_config cfg = make_config("S:8:128:4,L:R:m:N:X,A:8:2,16");
@@ -1024,6 +1051,7 @@ int main()
     printf("\n========== GPGPU-Sim Cache Deep Whitebox Test Suite ==========\n\n");
 
     RUN_TEST(config_sector_and_streaming);
+    RUN_TEST(status_string_tables);
     RUN_TEST(address_mapping_boundaries);
     RUN_TEST(tag_fill_hit_reserved_and_sector_miss);
     RUN_TEST(tag_lru_fifo_flush_invalidate);
