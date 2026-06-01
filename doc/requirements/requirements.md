@@ -58,3 +58,41 @@
 
 后续新增需求从这里继续追加，编号递增。
 
+## REQ-20260601-002 gpgpusim_cache 零缺陷取向验证体系
+
+### 原始需求
+
+用户要求：
+
+> gpgpusim_cache 你现在是一名验证人员，在你看来质量是最重要的，token自由，不考虑成本，想尽一切办法提升质量是你的生存价值；工作任务，给gpgpusim_cache构造用例；可以到网络上参考一下一些cache的开源用例，经典测试方法等等，为你所用。工作建议：step0 doc下写一个验证方案... step1 doc下建立一个feature文档... step2 doc下建立testcase文档... step3 根据feature和testcase文档构造用例... step4 反标到feature和testcase文档... step5 调试所有的用例... step6 构造一键回归的脚本... step7 统计覆盖率... step7 提交与推送。
+
+### 拆解需求
+
+| 子需求 | 内容 | 影响范围 | 状态 |
+|--------|------|----------|------|
+| REQ-20260601-002-A | 调研公开 cache 验证方法并编写验证方案 | `gpgpusim_cache/doc/verification/` | 已完成 |
+| REQ-20260601-002-B | 建立 gpgpusim_cache feature 分解文档 | `gpgpusim_cache/doc/verification/feature_matrix.md` | 已完成 |
+| REQ-20260601-002-C | 建立 testcase 说明和 feature 反标矩阵 | `gpgpusim_cache/doc/verification/testcase_matrix.md` | 已完成 |
+| REQ-20260601-002-D | 修复原测试框架断言失败假通过问题 | `gpgpusim_cache/test/test_main.cc` | 已完成 |
+| REQ-20260601-002-E | 新增 deep whitebox 测试覆盖配置、地址、tag、MSHR、写策略、texture、stats、DataStore、property trace | `gpgpusim_cache/test/test_cache_whitebox.cc` | 已完成 |
+| REQ-20260601-002-F | 将新增用例纳入一键回归脚本和 CMake | `gpgpusim_cache/run.sh`, `gpgpusim_cache/CMakeLists.txt` | 已完成 |
+| REQ-20260601-002-G | 增加覆盖率统计脚本并记录覆盖率基线 | `gpgpusim_cache/coverage.sh`, `gpgpusim_cache/doc/verification/verification_plan.md` | 已完成 |
+| REQ-20260601-002-H | 组织架构、验证、项目质量多 agent 检视并吸收结论 | `gpgpusim_cache/doc/verification/` | 已完成 |
+
+### 验收标准
+
+1. `gpgpusim_cache/doc/verification/verification_plan.md` 存在。
+2. `gpgpusim_cache/doc/verification/feature_matrix.md` 存在，feature 反标到 testcase。
+3. `gpgpusim_cache/doc/verification/testcase_matrix.md` 存在，testcase 反标到 feature 和测试文件。
+4. `gpgpusim_cache/test/test_cache_whitebox.cc` 纳入默认回归。
+5. `gpgpusim_cache/run.sh` 一键回归通过。
+6. `gpgpusim_cache/coverage.sh` 能生成覆盖率摘要。
+7. 回归和覆盖率结果记录在交付说明中。
+
+### 状态
+
+已完成。
+
+### 更新时间
+
+2026-06-01

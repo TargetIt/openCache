@@ -33,3 +33,48 @@
 
 后续 GPGPU-Sim 版本需求从这里继续追加。
 
+## REQ-20260601-002 gpgpusim_cache 零缺陷取向验证体系
+
+### 原始来源
+
+来自项目级需求 `REQ-20260601-002`。
+
+### 拆解需求
+
+| 子需求 | 内容 | 状态 |
+|--------|------|------|
+| GPGPUSIM-VERIFY-001 | 编写验证方案，吸收公开 cache 验证方法和多 agent 检视意见 | 已完成 |
+| GPGPUSIM-VERIFY-002 | 建立 feature 分解矩阵，覆盖用户场景、接口、白盒状态和流程 | 已完成 |
+| GPGPUSIM-VERIFY-003 | 建立 testcase 矩阵，并把 testcase 反标到 feature | 已完成 |
+| GPGPUSIM-VERIFY-004 | 修复 `test_main.cc` 失败假通过风险 | 已完成 |
+| GPGPUSIM-VERIFY-005 | 新增 `test_cache_whitebox.cc` 深度白盒测试 | 已完成 |
+| GPGPUSIM-VERIFY-006 | 更新 `run.sh`，一键运行 unit、scenario、whitebox 测试 | 已完成 |
+| GPGPUSIM-VERIFY-007 | 更新 CMake，纳入 whitebox 测试 | 已完成 |
+| GPGPUSIM-VERIFY-008 | 新增 `coverage.sh`，生成覆盖率摘要 | 已完成 |
+
+### 验收标准
+
+1. `./run.sh` 通过：unit 12/12，scenario 86/86 checks，whitebox 12/12。
+2. `./coverage.sh` 通过并输出覆盖率摘要。
+3. Feature/testcase 文档中每条已实现 testcase 映射到测试文件。
+4. 覆盖率基线已记录，低覆盖区域作为后续迭代输入。
+
+### 当前验证结果
+
+| 命令 | 结果 |
+|------|------|
+| `./run.sh` | 通过 |
+| `./coverage.sh` | 通过 |
+
+覆盖率基线：
+
+| 指标 | 覆盖率 |
+|------|--------|
+| Region | 46.42% |
+| Function | 63.57% |
+| Line | 58.48% |
+| Branch | 49.90% |
+
+### 更新时间
+
+2026-06-01

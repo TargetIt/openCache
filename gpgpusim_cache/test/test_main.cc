@@ -9,20 +9,28 @@
 
 static int tests_run = 0;
 static int tests_passed = 0;
+static int tests_failed = 0;
+static bool current_test_failed = false;
 
 #define TEST(name) void test_##name()
 #define RUN_TEST(name) do { \
     tests_run++; \
+    current_test_failed = false; \
     printf("  RUN  %s ... ", #name); \
     test_##name(); \
-    tests_passed++; \
-    printf("PASSED\n"); \
+    if (current_test_failed) { \
+        tests_failed++; \
+    } else { \
+        tests_passed++; \
+        printf("PASSED\n"); \
+    } \
 } while(0)
 
 #define ASSERT_EQ(a, b) do { \
     if ((a) != (b)) { \
         printf("FAILED\n  ASSERT_EQ(%s, %s): %llu != %llu\n", \
                #a, #b, (unsigned long long)(a), (unsigned long long)(b)); \
+        current_test_failed = true; \
         return; \
     } \
 } while(0)
@@ -30,6 +38,7 @@ static int tests_passed = 0;
 #define ASSERT_TRUE(cond) do { \
     if (!(cond)) { \
         printf("FAILED\n  ASSERT_TRUE(%s)\n", #cond); \
+        current_test_failed = true; \
         return; \
     } \
 } while(0)
@@ -320,7 +329,7 @@ int main() {
     printf("[1] Configuration Tests\n");
     RUN_TEST(config_parse_basic);
     RUN_TEST(config_parse_sector);
-    // RUN_TEST(config_disabled);
+    RUN_TEST(config_disabled);
 
     printf("\n[2] Tag Array Tests\n");
     RUN_TEST(tag_array_probe_miss);
@@ -353,5 +362,9 @@ int main() {
     printf("\n========== Results: %d/%d tests passed ==========\n",
            tests_passed, tests_run);
 
-    return tests_passed == tests_run ? 0 : 1;
+    if (tests_failed) {
+        printf("========== Failures: %d ==========\n", tests_failed);
+    }
+
+    return tests_failed == 0 && tests_passed == tests_run ? 0 : 1;
 }

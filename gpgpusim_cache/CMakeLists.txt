@@ -26,6 +26,12 @@ add_executable(test_scenario
 )
 target_link_libraries(test_scenario gpgpu_cache_ref)
 
+# Deep whitebox tests
+add_executable(test_cache_whitebox
+    test/test_cache_whitebox.cc
+)
+target_link_libraries(test_cache_whitebox gpgpu_cache_ref)
+
 # Compiler options
 if(MSVC)
     target_compile_options(gpgpu_cache_ref PRIVATE /W3 /EHsc)
@@ -36,3 +42,4 @@ endif()
 enable_testing()
 add_test(NAME gpgpu_cache_ref_tests COMMAND test_gpgpu_cache_ref)
 add_test(NAME scenario_tests COMMAND test_scenario)
+add_test(NAME cache_whitebox_tests COMMAND test_cache_whitebox)

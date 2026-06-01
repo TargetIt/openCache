@@ -14,3 +14,11 @@ gem5_cache/test_scenario.dSYM/
 gem5_cache/build/
 gem5_cache/test_gpgpu_cache_ref
 gem5_cache/test_gpgpu_cache_ref.dSYM/
+gpgpusim_cache/test_gpgpu_cache_ref
+gpgpusim_cache/test_gpgpu_cache_ref.dSYM/
+gpgpusim_cache/test_scenario
+gpgpusim_cache/test_scenario.dSYM/
+gpgpusim_cache/test_cache_whitebox
+gpgpusim_cache/test_cache_whitebox.dSYM/
+gpgpusim_cache/coverage/
+gpgpusim_cache/build/
