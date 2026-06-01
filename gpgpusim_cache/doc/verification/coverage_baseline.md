@@ -12,9 +12,9 @@
 
 | 文件 | Region | Function | Line | Branch |
 |------|--------|----------|------|--------|
-| `gpu_cache_ref.cc` | 43.72% | 64.21% | 55.91% | 46.52% |
-| `gpu_cache_ref.h` | 52.93% | 63.19% | 63.16% | 61.11% |
-| Total | 46.42% | 63.57% | 58.48% | 49.90% |
+| `gpu_cache_ref.cc` | 47.97% | 67.37% | 61.80% | 51.16% |
+| `gpu_cache_ref.h` | 56.19% | 68.10% | 69.19% | 64.96% |
+| Total | 50.38% | 67.83% | 64.41% | 54.36% |
 
 ## 结论
 
@@ -24,5 +24,5 @@
 2. 更完整的 sector cache 状态组合。
 3. texture cache FIFO/ROB/result FIFO 极限组合。
 4. data/fill port timing 精确断言。
-5. hash function golden 对照。
+5. 更大地址集的 hash function golden 对照。
 6. 更长 seed 集的 differential/property trace。

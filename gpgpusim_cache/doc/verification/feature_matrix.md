@@ -9,21 +9,21 @@
 | F-CFG-003 | cache type | 接口/白盒 | NORMAL、SECTOR、sector line size 约束 | TC-CFG-003, TC-TAG-004 |
 | F-CFG-004 | replacement policy | 白盒 | LRU/FIFO victim 差异 | TC-TAG-005 |
 | F-CFG-005 | allocation policy | 白盒 | ON_MISS、ON_FILL、STREAMING | TC-CFG-004, TC-TAG-006 |
-| F-CFG-006 | write policy | 白盒 | WB、WT、WE、LOCAL_WB_GLOBAL_WT | TC-WR-001, TC-WR-002, TC-WR-003 |
-| F-CFG-007 | write allocate policy | 白盒 | N/W/F/L 四种策略 | TC-WR-004, TC-WR-005 |
+| F-CFG-006 | write policy | 白盒 | WB、WT、WE、LOCAL_WB_GLOBAL_WT | TC-WR-001, TC-WR-002, TC-WR-003, TC-WR-008 |
+| F-CFG-007 | write allocate policy | 白盒 | N/W/F/L 四种策略 | TC-WR-004, TC-WR-005, TC-WR-007, TC-WR-009 |
 | F-CFG-008 | MSHR type | 白盒 | ASSOC、SECTOR_ASSOC、TEX_FIFO、SECTOR_TEX_FIFO | TC-MSHR-001, TC-TEX-001 |
-| F-CFG-009 | set index function | 白盒 | LINEAR、XOR、IPOLY、FERMI、CUSTOM 范围与基本差异；golden 对照后续补充 | TC-ADDR-001 |
+| F-CFG-009 | set index function | 白盒 | LINEAR、XOR、IPOLY、FERMI、CUSTOM 范围、基本差异和选定地址 golden 值 | TC-ADDR-001 |
 | F-ADDR-001 | block/tag/mshr 地址对齐 | 接口 | line、sector atom、tag 等式 | TC-ADDR-002 |
 | F-ADDR-002 | 边界地址 | 接口 | 0、line 末尾、跨 line、较大地址 | TC-ADDR-003 |
 | F-BLK-001 | line block 生命周期 | 白盒 | INVALID->RESERVED->VALID->MODIFIED->INVALID | TC-TAG-001, TC-TAG-002 |
 | F-BLK-002 | sector block 生命周期 | 白盒 | partial sector valid、SECTOR_MISS | TC-TAG-004 |
 | F-BLK-003 | dirty byte/sector mask | 白盒 | partial write、modified size、evicted mask | TC-WR-006 |
-| F-BLK-004 | readable 标志 | 白盒 | partial write unreadable read 触发 miss | TC-WR-007 (Planned) |
+| F-BLK-004 | readable 标志 | 白盒 | partial write unreadable read 触发 miss，full-sector write read 命中 | TC-WR-007 |
 | F-TAG-001 | probe miss/hit | 接口 | MISS、HIT | TC-TAG-001 |
 | F-TAG-002 | hit reserved | 白盒 | pending fill 命中返回 HIT_RESERVED | TC-TAG-003 |
-| F-TAG-003 | line allocation fail | 白盒 | all reserved -> RESERVATION_FAIL | TC-TAG-007 (Planned) |
+| F-TAG-003 | line allocation fail | 白盒 | all reserved -> RESERVATION_FAIL | TC-TAG-007 |
 | F-TAG-004 | fill 行为 | 白盒 | fill 后有效、ON_FILL fill allocate | TC-TAG-002, TC-TAG-006 |
-| F-TAG-005 | flush/invalidate | 接口 | flush 只 invalid modified，invalidate invalid all | TC-TAG-008 |
+| F-TAG-005 | flush/invalidate | 接口 | flush 只 invalid modified 且保留 clean line；invalidate invalid all | TC-TAG-008 |
 | F-TAG-006 | new_window/windowed_miss_rate | 统计 | window snapshot | TC-STATS-003 |
 | F-MSHR-001 | MSHR add/probe/ready | 接口 | add、mark_ready、next_access | TC-MSHR-001 |
 | F-MSHR-002 | MSHR merge 上限 | 白盒 | full(block) true | TC-MSHR-002 |

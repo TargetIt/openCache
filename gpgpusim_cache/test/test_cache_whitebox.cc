@@ -165,6 +165,13 @@ TEST(address_mapping_boundaries)
     CHECK_TRUE(fermi.set_index(0x4000) < fermi.get_nset());
     CHECK_TRUE(linear.set_index(0x1000) != xoring.set_index(0x1000) ||
                linear.set_index(0x2000) != xoring.set_index(0x2000));
+
+    CHECK_EQ(linear.set_index(0x12340), 13u);
+    CHECK_EQ(xoring.set_index(0x12340), 5u);
+    CHECK_EQ(ipoly.set_index(0x12340), 9u);
+    CHECK_EQ(custom.set_index(0x12340), 0u);
+    CHECK_EQ(fermi.set_index(0x12340), 12u);
+    CHECK_EQ(fermi.set_index(0x2000), 1u);
 }
 
 TEST(tag_fill_hit_reserved_and_sector_miss)
@@ -217,6 +224,7 @@ TEST(tag_lru_fifo_flush_invalidate)
 
     lru.invalidate();
     CHECK_EQ(lru.probe(0x0000, idx, a, false), MISS);
+    CHECK_EQ(lru.probe(0x0080, idx, c, false), MISS);
 
     simple_mf_allocator allocator;
     gpgpu_sim gpu;
@@ -231,10 +239,26 @@ TEST(tag_lru_fifo_flush_invalidate)
     events.clear();
     mem_fetch *fw = new_mf(0x1000, 4, true, GLOBAL_ACC_W);
     CHECK_EQ(cache.access(fw->get_addr(), fw, 3, events), HIT);
+    events.clear();
+    mem_fetch *clean = new_mf(0x1040, 4, false, GLOBAL_ACC_R);
+    CHECK_EQ(cache.access(clean->get_addr(), clean, 4, events), MISS);
+    drain_one_level(cache, mem, 5);
     cache.flush();
     events.clear();
+    mem_fetch *clean_after_flush = new_mf(0x1040, 4, false, GLOBAL_ACC_R);
+    CHECK_EQ(cache.access(clean_after_flush->get_addr(), clean_after_flush, 6,
+                          events),
+             HIT);
+    events.clear();
     mem_fetch *after_flush = new_mf(0x1000, 4, false, GLOBAL_ACC_R);
-    CHECK_EQ(cache.access(after_flush->get_addr(), after_flush, 4, events), MISS);
+    CHECK_EQ(cache.access(after_flush->get_addr(), after_flush, 7, events), MISS);
+    drain_one_level(cache, mem, 8);
+    cache.invalidate();
+    events.clear();
+    mem_fetch *clean_after_invalidate = new_mf(0x1040, 4, false, GLOBAL_ACC_R);
+    CHECK_EQ(cache.access(clean_after_invalidate->get_addr(),
+                          clean_after_invalidate, 9, events),
+             MISS);
 }
 
 TEST(tag_on_fill_all_reserved)
@@ -246,6 +270,20 @@ TEST(tag_on_fill_all_reserved)
     CHECK_EQ(tags.probe(0x0000, idx, a, false), MISS);
     tags.fill(0x0000, 1, a, false);
     CHECK_EQ(tags.probe(0x0000, idx, a, false), HIT);
+
+    cache_config on_miss = make_config("N:1:64:1,L:R:m:N:L,A:4:2,8");
+    tag_array one_way(on_miss, 0, 0);
+    mem_fetch *reserved = new_mf(0x0000, 4, false, GLOBAL_ACC_R);
+    mem_fetch *conflict = new_mf(0x0040, 4, false, GLOBAL_ACC_R);
+    CHECK_EQ(one_way.access(0x0000, 2, idx, reserved), MISS);
+    CHECK_EQ(one_way.probe(0x0040, idx, conflict, false), RESERVATION_FAIL);
+    unsigned accesses = 0;
+    unsigned misses = 0;
+    unsigned pending_hits = 0;
+    unsigned res_fails = 0;
+    one_way.access(0x0040, 3, idx, conflict);
+    one_way.get_stats(accesses, misses, pending_hits, res_fails);
+    CHECK_EQ(res_fails, 1u);
 }
 
 TEST(mshr_capacity_order_raw)
@@ -359,6 +397,38 @@ TEST(data_cache_read_and_write_policies)
         mem_fetch *again = new_mf(0x1000, 4, false, GLOBAL_ACC_R);
         CHECK_EQ(cache.access(again->get_addr(), again, 4, events), MISS);
     }
+
+    {
+        simple_mem_interface mem(64);
+        cache_config cfg = make_config("N:4:64:2,L:L:m:N:L,A:8:4,16");
+        l1_cache cache("LocalWbGlobalWt", cfg, 0, 0, &mem, &allocator,
+                       IN_L1D_MISS_QUEUE, &gpu, L1_GPU_CACHE);
+        std::list<cache_event> events;
+        mem_fetch *global_r = new_mf(0x1000, 4, false, GLOBAL_ACC_R);
+        CHECK_EQ(cache.access(global_r->get_addr(), global_r, 1, events),
+                 MISS);
+        drain_one_level(cache, mem, 2);
+        events.clear();
+        mem_fetch *global_w = new_mf(0x1000, 4, true, GLOBAL_ACC_W);
+        CHECK_EQ(cache.access(global_w->get_addr(), global_w, 3, events),
+                 HIT);
+        CHECK_TRUE(has_event(events, WRITE_REQUEST_SENT));
+
+        simple_mem_interface local_mem(64);
+        l1_cache local_cache("LocalWbGlobalWtLocal", cfg, 0, 0, &local_mem,
+                             &allocator, IN_L1D_MISS_QUEUE, &gpu,
+                             L1_GPU_CACHE);
+        events.clear();
+        mem_fetch *local_r = new_mf(0x1080, 4, false, LOCAL_ACC_R);
+        CHECK_EQ(local_cache.access(local_r->get_addr(), local_r, 5, events),
+                 MISS);
+        drain_one_level(local_cache, local_mem, 6);
+        events.clear();
+        mem_fetch *local_w = new_mf(0x1080, 4, true, LOCAL_ACC_W);
+        CHECK_EQ(local_cache.access(local_w->get_addr(), local_w, 7, events),
+                 HIT);
+        CHECK_FALSE(has_event(events, WRITE_REQUEST_SENT));
+    }
 }
 
 TEST(write_miss_events_and_writeback)
@@ -385,6 +455,26 @@ TEST(write_miss_events_and_writeback)
     CHECK_EQ(wa.access(w1->get_addr(), w1, 1, events), MISS);
     CHECK_TRUE(has_event(events, WRITE_REQUEST_SENT));
     CHECK_TRUE(has_event(events, WRITE_ALLOCATE_SENT));
+    wa.cycle();
+    wa.cycle();
+    CHECK_EQ(wa_mem.queue.size(), 2u);
+
+    simple_mem_interface fow_mem(64);
+    cache_config fow_cfg = make_config("N:4:64:2,L:B:m:F:L,A:8:4,16");
+    l1_cache fow("FetchOnWrite", fow_cfg, 0, 0, &fow_mem, &allocator,
+                 IN_L1D_MISS_QUEUE, &gpu, L1_GPU_CACHE);
+    events.clear();
+    mem_fetch *full_write = new_mf(0x2400, 64, true, GLOBAL_ACC_W, 1,
+                                   sector_mask(0), byte_mask_range(0, 64));
+    CHECK_EQ(fow.access(full_write->get_addr(), full_write, 1, events), MISS);
+    CHECK_FALSE(has_event(events, READ_REQUEST_SENT));
+    CHECK_FALSE(has_event(events, WRITE_ALLOCATE_SENT));
+    events.clear();
+    mem_fetch *partial_write = new_mf(0x2480, 4, true, GLOBAL_ACC_W, 2,
+                                      sector_mask(0), byte_mask_range(0, 4));
+    CHECK_EQ(fow.access(partial_write->get_addr(), partial_write, 2, events),
+             MISS);
+    CHECK_TRUE(has_event(events, WRITE_ALLOCATE_SENT));
 
     simple_mem_interface wb_mem(64);
     cache_config wb_cfg = make_config("N:1:64:1,L:B:m:F:L,A:8:4,16");
@@ -402,6 +492,43 @@ TEST(write_miss_events_and_writeback)
     mem_fetch *r2 = new_mf(0x0040, 4, false, GLOBAL_ACC_R);
     CHECK_EQ(wb.access(r2->get_addr(), r2, 4, events), MISS);
     CHECK_TRUE(has_event(events, WRITE_BACK_REQUEST_SENT));
+
+    simple_mem_interface lazy_mem(64);
+    cache_config lazy_cfg = make_config("S:2:128:1,L:B:m:L:L,A:8:4,16");
+    l1_cache lazy("LazyPartial", lazy_cfg, 0, 0, &lazy_mem, &allocator,
+                  IN_L1D_MISS_QUEUE, &gpu, L1_GPU_CACHE);
+    events.clear();
+    mem_fetch *partial = new_mf(0x3000, 4, true, GLOBAL_ACC_W, 1,
+                                sector_mask(0), byte_mask_range(0, 4));
+    CHECK_EQ(lazy.access(partial->get_addr(), partial, 1, events), MISS);
+    CHECK_FALSE(has_event(events, READ_REQUEST_SENT));
+    events.clear();
+    mem_fetch *read_partial = new_mf(0x3000, 4, false, GLOBAL_ACC_R, 2,
+                                     sector_mask(0), byte_mask_range(0, 4));
+    CHECK_EQ(lazy.access(read_partial->get_addr(), read_partial, 2, events),
+             MISS);
+    CHECK_TRUE(has_event(events, READ_REQUEST_SENT));
+    drain_one_level(lazy, lazy_mem, 3);
+    events.clear();
+    mem_fetch *read_after_fill = new_mf(0x3000, 4, false, GLOBAL_ACC_R, 4,
+                                        sector_mask(0), byte_mask_range(0, 4));
+    CHECK_EQ(lazy.access(read_after_fill->get_addr(), read_after_fill, 4,
+                         events),
+             HIT);
+
+    simple_mem_interface full_mem(64);
+    l1_cache full_lazy("LazyFull", lazy_cfg, 0, 0, &full_mem, &allocator,
+                       IN_L1D_MISS_QUEUE, &gpu, L1_GPU_CACHE);
+    mem_fetch *full = new_mf(0x4000, SECTOR_SIZE, true, GLOBAL_ACC_W, 1,
+                             sector_mask(0), byte_mask_range(0, SECTOR_SIZE));
+    events.clear();
+    CHECK_EQ(full_lazy.access(full->get_addr(), full, 1, events), MISS);
+    events.clear();
+    mem_fetch *read_full = new_mf(0x4000, 4, false, GLOBAL_ACC_R, 2,
+                                  sector_mask(0), byte_mask_range(0, 4));
+    CHECK_EQ(full_lazy.access(read_full->get_addr(), read_full, 2, events),
+             HIT);
+    CHECK_FALSE(has_event(events, READ_REQUEST_SENT));
 }
 
 TEST(texture_pipeline_and_backpressure)
@@ -477,6 +604,13 @@ TEST(stats_datastore_property_trace)
     CHECK_TRUE(store.contains(0x1000));
     std::vector<uint8_t> read = store.read(0x1000, 4);
     CHECK_EQ(read[2], 3u);
+    uint8_t partial[2] = {9, 8};
+    store.write(0x1000, partial, 2);
+    std::vector<uint8_t> preserved = store.read(0x1000, 4);
+    CHECK_EQ(preserved[0], 9u);
+    CHECK_EQ(preserved[1], 8u);
+    CHECK_EQ(preserved[2], 3u);
+    CHECK_EQ(preserved[3], 4u);
 
     simple_mem_interface mem(512);
     gpgpu_sim gpu;

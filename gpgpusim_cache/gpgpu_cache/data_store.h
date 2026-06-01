@@ -37,7 +37,7 @@ public:
     // Data is stored keyed by block_addr (cache-line-aligned address).
     void write(new_addr_type block_addr, const uint8_t* data, unsigned size) {
         std::vector<uint8_t>& entry = m_storage[block_addr];
-        entry.resize(size);
+        if (entry.size() < size) entry.resize(size);
         memcpy(entry.data(), data, size);
     }
 

@@ -12,7 +12,7 @@
 |------|------------|----------------|
 | gem5 Classic Caches: https://www.gem5.org/documentation/general_docs/memory_system/classic_caches/ | 将 cache 分解为 tags、replacement、indexing、MSHR、write queue 等可验证组件 | 把 `tag_array`、replacement、set index、MSHR 拆成独立 feature 和 testcase |
 | gem5 Replacement Policies: https://www.gem5.org/documentation/general_docs/memory_system/replacement_policies/ | 将 reset/touch/invalidate/getVictim 语义拆成可观测行为 | 针对 LRU/FIFO、invalid-first、flush/invalidate 构造白盒测试 |
-| gem5 Indexing Policies: https://www.gem5.org/documentation/general_docs/memory_system/indexing_policies/ | 将 set index function 作为独立风险点 | 当前覆盖范围与差异，后续补 golden 对照 |
+| gem5 Indexing Policies: https://www.gem5.org/documentation/general_docs/memory_system/indexing_policies/ | 将 set index function 作为独立风险点 | 覆盖范围、差异和选定地址 golden 值 |
 | GPGPU-Sim cache 模型 | 数据 cache、texture cache、MSHR、sector cache、write policy 与事件模型 | 按 GPGPU-Sim 的配置字符串、写策略、sector/texture 管线构造白盒测试 |
 | ChampSim: https://github.com/ChampSim/ChampSim 与 https://champsim.github.io/ChampSim/ | 用固定 trace 和固定 seed 的回归保护替换策略与命中率 | 增加固定 seed 的 deterministic trace/property 测试 |
 | 经典 cache 测试方法 | compulsory/capacity/conflict miss、LRU/FIFO victim、write-through/write-back、flush/invalidate、backpressure | 按 feature 建立 directed tests、边界 tests、随机 tests 和场景集成 tests |
@@ -64,12 +64,12 @@
 
 | 指标 | 覆盖率 |
 |------|--------|
-| Region | 46.42% |
-| Function | 63.57% |
-| Line | 58.48% |
-| Branch | 49.90% |
+| Region | 50.38% |
+| Function | 67.83% |
+| Line | 64.41% |
+| Branch | 54.36% |
 
-当前覆盖率未达到长期目标。原因是本阶段优先补齐默认回归、白盒关键路径、feature/testcase 追踪和覆盖率基础设施；death tests、非法配置矩阵、更多 sector/texture backpressure、hash golden 对照、partial write readable oracle 和随机 differential 长跑仍需后续迭代。覆盖率报告由 `gpgpusim_cache/coverage.sh` 生成，提交中固化的基线见 `coverage_baseline.md`。
+当前覆盖率未达到长期目标。原因是本阶段优先补齐默认回归、白盒关键路径、feature/testcase 追踪和覆盖率基础设施；death tests、非法配置矩阵、更多 sector/texture backpressure、更多 hash golden 地址和随机 differential 长跑仍需后续迭代。覆盖率报告由 `gpgpusim_cache/coverage.sh` 生成，提交中固化的基线见 `coverage_baseline.md`。
 
 ## 迭代准则
 
