@@ -107,6 +107,15 @@ static unsigned count_event(const std::list<cache_event> &events, cache_event_ty
     return count;
 }
 
+static cache_event find_event(const std::list<cache_event> &events,
+                              cache_event_type type)
+{
+    for (const cache_event &event : events)
+        if (event.m_cache_event_type == type)
+            return event;
+    return cache_event(type);
+}
+
 static void drain_one_level(baseline_cache &cache, simple_mem_interface &mem,
                             unsigned cycle)
 {
@@ -601,6 +610,39 @@ TEST(write_miss_events_and_writeback)
     CHECK_FALSE(has_event(events, READ_REQUEST_SENT));
 }
 
+TEST(sector_dirty_masks_and_writeback)
+{
+    simple_mem_interface mem(64);
+    simple_mf_allocator allocator;
+    gpgpu_sim gpu;
+    cache_config cfg = make_config("S:1:128:1,L:B:m:F:L,A:8:4,16");
+    l1_cache cache("SectorDirty", cfg, 0, 0, &mem, &allocator,
+                   IN_L1D_MISS_QUEUE, &gpu, L1_GPU_CACHE);
+    std::list<cache_event> events;
+
+    mem_fetch *write_s0 = new_mf(0x0000, SECTOR_SIZE, true, GLOBAL_ACC_W, 1,
+                                 sector_mask(0), byte_mask_range(0, SECTOR_SIZE));
+    CHECK_EQ(cache.access(write_s0->get_addr(), write_s0, 1, events), MISS);
+
+    events.clear();
+    mem_fetch *write_s2 = new_mf(0x0040, SECTOR_SIZE, true, GLOBAL_ACC_W, 2,
+                                 sector_mask(2), byte_mask_range(64, SECTOR_SIZE));
+    CHECK_EQ(cache.access(write_s2->get_addr(), write_s2, 2, events), MISS);
+
+    events.clear();
+    mem_fetch *evict = new_mf(0x0080, SECTOR_SIZE, true, GLOBAL_ACC_W, 3,
+                              sector_mask(0), byte_mask_range(0, SECTOR_SIZE));
+    CHECK_EQ(cache.access(evict->get_addr(), evict, 3, events), MISS);
+    CHECK_TRUE(has_event(events, WRITE_BACK_REQUEST_SENT));
+    cache_event wb = find_event(events, WRITE_BACK_REQUEST_SENT);
+    CHECK_EQ(wb.m_evicted_block.m_block_addr, 0ull);
+    CHECK_EQ(wb.m_evicted_block.m_modified_size, (unsigned)(2 * SECTOR_SIZE));
+    CHECK_TRUE(wb.m_evicted_block.m_sector_mask.test(0));
+    CHECK_FALSE(wb.m_evicted_block.m_sector_mask.test(1));
+    CHECK_TRUE(wb.m_evicted_block.m_sector_mask.test(2));
+    CHECK_FALSE(wb.m_evicted_block.m_sector_mask.test(3));
+}
+
 TEST(texture_pipeline_and_backpressure)
 {
     simple_mem_interface mem(64);
@@ -636,6 +678,32 @@ TEST(texture_pipeline_and_backpressure)
     events.clear();
     CHECK_EQ(bp.access(first->get_addr(), first, 1, events), MISS);
     CHECK_EQ(bp.access(second->get_addr(), second, 2, events), RESERVATION_FAIL);
+
+    simple_mem_interface rf_mem(64);
+    cache_config rf_cfg = make_config("N:4:128:4,L:R:m:N:L,F:4:4,4:1");
+    tex_cache rf("TexResultFIFO", rf_cfg, 0, 0, &rf_mem, IN_L1T_MISS_QUEUE,
+                 IN_SHADER_L1T_ROB);
+    events.clear();
+    mem_fetch *miss = new_mf(0x3000, 4, false, TEXTURE_ACC_R);
+    CHECK_EQ(rf.access(miss->get_addr(), miss, 1, events), MISS);
+    rf.cycle();
+    CHECK_EQ(rf_mem.queue.size(), 1u);
+    mem_fetch *miss_resp = rf_mem.queue.front();
+    rf_mem.queue.pop_front();
+    rf.fill(miss_resp, 2);
+    rf.cycle();
+    CHECK_TRUE(rf.access_ready());
+
+    events.clear();
+    mem_fetch *rf_hit = new_mf(0x3000, 4, false, TEXTURE_ACC_R);
+    CHECK_EQ(rf.access(rf_hit->get_addr(), rf_hit, 3, events), HIT_RESERVED);
+    rf.cycle();
+    CHECK_TRUE(rf.access_ready());
+    CHECK_TRUE(rf.next_access() == miss);
+    CHECK_FALSE(rf.access_ready());
+    rf.cycle();
+    CHECK_TRUE(rf.access_ready());
+    CHECK_TRUE(rf.next_access() == rf_hit);
 }
 
 TEST(stats_datastore_property_trace)
@@ -756,6 +824,7 @@ int main()
     RUN_TEST(fail_reason_counters);
     RUN_TEST(data_cache_read_and_write_policies);
     RUN_TEST(write_miss_events_and_writeback);
+    RUN_TEST(sector_dirty_masks_and_writeback);
     RUN_TEST(texture_pipeline_and_backpressure);
     RUN_TEST(stats_datastore_property_trace);
     RUN_TEST(port_timing_visibility);

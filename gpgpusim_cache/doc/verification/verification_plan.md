@@ -64,10 +64,10 @@
 
 | 指标 | 覆盖率 |
 |------|--------|
-| Region | 50.40% |
-| Function | 68.08% |
-| Line | 64.89% |
-| Branch | 54.47% |
+| Region | 51.40% |
+| Function | 69.62% |
+| Line | 66.27% |
+| Branch | 55.85% |
 
 当前覆盖率未达到长期目标。原因是本阶段优先补齐默认回归、白盒关键路径、feature/testcase 追踪、death test 和覆盖率基础设施；更多 sector/texture backpressure、更多 hash golden 地址和随机 differential 长跑仍需后续迭代。覆盖率报告由 `gpgpusim_cache/coverage.sh` 生成，提交中固化的基线见 `coverage_baseline.md`。death tests 通过子进程验证 abort/assert 路径，默认不计入 coverage，以避免 abort profile 造成覆盖率文件不稳定。
 

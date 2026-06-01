@@ -37,10 +37,11 @@
 | TC-WR-007 | F-WR-007, F-BLK-004 | unit | Implemented | `test/test_cache_whitebox.cc` | lazy fetch partial write 后 read 触发 READ_REQUEST_SENT；full-sector write 后 read 命中 |
 | TC-WR-008 | F-CFG-006 | unit | Implemented | `test/test_cache_whitebox.cc` | LOCAL_WB_GLOBAL_WT：global write hit write-through，local write hit write-back |
 | TC-WR-009 | F-CFG-007 | unit | Implemented | `test/test_cache_whitebox.cc` | FETCH_ON_WRITE：full-line write 不 fetch，partial write 触发 write-allocate |
+| TC-WR-010 | F-BLK-003, F-WR-006 | unit | Implemented | `test/test_cache_whitebox.cc` | sector cache 多 dirty sector 驱逐时 writeback size 和 sector mask 正确 |
 | TC-SCEN-001 | F-L1L2-001 | scenario | Implemented | `test/test_scenario.cc` | L1/L2 集成场景通过 |
 | TC-TEX-001 | F-TEX-001 | unit | Implemented | `test/test_cache_whitebox.cc` | texture miss fill 后 ready |
 | TC-TEX-002 | F-TEX-002 | unit | Implemented | `test/test_cache_whitebox.cc` | texture hit 返回 HIT_RESERVED 并 ready |
-| TC-TEX-003 | F-TEX-003 | unit | Implemented | `test/test_cache_whitebox.cc` | texture FIFO/ROB 满 backpressure |
+| TC-TEX-003 | F-TEX-003 | unit | Implemented | `test/test_cache_whitebox.cc` | texture FIFO/ROB 满 backpressure，result FIFO 满时阻塞后续 ready |
 | TC-BW-001 | F-BW-001 | unit | Implemented | `test/test_cache_whitebox.cc` | data/fill port free 状态变化 |
 | TC-STATS-001 | F-STATS-001 | unit | Implemented | `test/test_main.cc` | cache_sub_stats 汇总 |
 | TC-STATS-002 | F-STATS-002 | unit | Implemented | `test/test_cache_whitebox.cc` | LINE_ALLOC_FAIL、MISS_QUEUE_FULL、MSHR_ENTRY、MSHR_MERGE、MSHR_RW_PENDING 精确查询 |
@@ -49,7 +50,7 @@
 | TC-FUNC-002 | F-FUNC-002 | scenario | Implemented | `test/test_scenario.cc` | dual model 数据一致 |
 | TC-PROP-001 | F-PROP-001 | property | Implemented | `test/test_cache_whitebox.cc` | fixed seed trace 不变量 |
 | TC-REG-001 | F-REG-001 | regression | Implemented | `run.sh` | 一键回归 unit/scenario/whitebox/death 全部通过 |
-| TC-COV-001 | F-COV-001 | coverage | Implemented | `coverage.sh` | 生成覆盖率报告；当前 line 64.89%、function 68.08%、branch 54.47%；death 子进程 abort 路径不计入 coverage |
+| TC-COV-001 | F-COV-001 | coverage | Implemented | `coverage.sh` | 生成覆盖率报告；当前 line 66.27%、function 69.62%、branch 55.85%；death 子进程 abort 路径不计入 coverage |
 
 ## 多角色检视记录
 
@@ -58,4 +59,4 @@
 | step0 验证方案 | 通过，要求覆盖写策略和 sector/texture | 通过，要求区分用户场景与白盒 | 通过，要求先修测试框架假通过 | 通过，要求 requirements 追踪 |
 | step1 feature | 通过，feature 覆盖主要接口和状态机 | 通过，建议后续补 death tests | 通过，要求每条反标 testcase | 通过，要求 planned 不得冒充 implemented |
 | step2 testcase | 通过，覆盖架构风险点 | 通过，测试分层明确 | 通过，要求默认回归全部可执行 | 通过，要求 run.sh 和 coverage.sh 纳入交付 |
-| step3-step7 | 通过，新增白盒和 death 覆盖关键架构风险；覆盖率需后续继续提升 | 通过，run.sh/CMake/coverage.sh 均纳入 | 通过，默认回归 13+10+13+6 全通过 | 通过，文档和追踪矩阵已刷新 |
+| step3-step7 | 通过，新增白盒和 death 覆盖关键架构风险；覆盖率需后续继续提升 | 通过，run.sh/CMake/coverage.sh 均纳入 | 通过，默认回归 13+10+14+6 全通过 | 通过，文档和追踪矩阵已刷新 |
