@@ -9,7 +9,7 @@
 | TC-CFG-003 | F-CFG-003 | unit | Implemented | `test/test_cache_whitebox.cc` | NORMAL/SECTOR atom size 正确 |
 | TC-CFG-004 | F-CFG-005 | unit | Implemented | `test/test_cache_whitebox.cc` | STREAMING 转 ON_FILL 且 `is_streaming()` |
 | TC-DEATH-001 | F-CFG-010 | death | Implemented | `test/test_death.cc` | 非法配置/assert 路径在子进程中异常退出，主回归不中断 |
-| TC-ADDR-001 | F-CFG-009 | unit | Implemented | `test/test_cache_whitebox.cc` | LINEAR/XOR/IPOLY/FERMI/CUSTOM set-index 在范围内，并校验选定地址 golden 值 |
+| TC-ADDR-001 | F-CFG-009 | unit | Implemented | `test/test_cache_whitebox.cc` | LINEAR/XOR/IPOLY/CUSTOM/FERMI32/FERMI64 set-index 在范围内，并校验 9 个边界/高位地址 golden 值 |
 | TC-ADDR-002 | F-ADDR-001 | unit | Implemented | `test/test_cache_whitebox.cc` | block/tag/mshr 地址按 line/sector 对齐 |
 | TC-ADDR-003 | F-ADDR-002 | unit | Implemented | `test/test_cache_whitebox.cc` | 边界地址映射不越界 |
 | TC-TAG-001 | F-BLK-001, F-TAG-001 | unit | Implemented | `test/test_main.cc` | tag miss 后 fill，再 probe hit |
@@ -51,7 +51,7 @@
 | TC-PROP-001 | F-PROP-001 | property | Implemented | `test/test_cache_whitebox.cc` | fixed seed trace 不变量 |
 | TC-PROP-002 | F-PROP-001 | property | Implemented | `test/test_cache_whitebox.cc` | 5-seed read-only 随机 trace 重复运行差分一致，校验 accesses/misses/res_fails 不变量 |
 | TC-REG-001 | F-REG-001 | regression | Implemented | `run.sh` | 一键回归 unit/scenario/whitebox/death 全部通过 |
-| TC-COV-001 | F-COV-001 | coverage | Implemented | `coverage.sh` | 生成覆盖率报告；当前 line 66.27%、function 69.62%、branch 55.85%；death 子进程 abort 路径不计入 coverage |
+| TC-COV-001 | F-COV-001 | coverage | Implemented | `coverage.sh` | 生成覆盖率报告；当前 line 66.27%、function 69.62%、branch 56.15%；death 子进程 abort 路径不计入 coverage |
 
 ## 多角色检视记录
 

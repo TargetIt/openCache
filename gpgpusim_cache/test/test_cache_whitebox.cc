@@ -77,6 +77,16 @@ static mem_access_sector_mask_t sector_mask(unsigned sector)
     return mask;
 }
 
+struct set_index_golden {
+    new_addr_type addr;
+    unsigned linear;
+    unsigned xoring;
+    unsigned ipoly;
+    unsigned custom;
+    unsigned fermi32;
+    unsigned fermi64;
+};
+
 static mem_fetch *new_mf(new_addr_type addr, unsigned size, bool wr,
                          mem_access_type type, unsigned cycle = 0,
                          mem_access_sector_mask_t sm = sector_mask(0),
@@ -167,20 +177,35 @@ TEST(address_mapping_boundaries)
     cache_config ipoly = make_config("N:16:64:2,L:R:m:N:P,A:8:2,16");
     cache_config custom = make_config("N:16:64:2,L:R:m:N:C,A:8:2,16");
     cache_config fermi = make_config("N:32:64:2,L:R:m:N:H,A:8:2,16");
+    cache_config fermi64 = make_config("N:64:64:2,L:R:m:N:H,A:8:2,16");
     CHECK_TRUE(linear.set_index(0x4000) < linear.get_nset());
     CHECK_TRUE(xoring.set_index(0x4000) < xoring.get_nset());
     CHECK_TRUE(ipoly.set_index(0x4000) < ipoly.get_nset());
     CHECK_TRUE(custom.set_index(0x4000) < custom.get_nset());
     CHECK_TRUE(fermi.set_index(0x4000) < fermi.get_nset());
+    CHECK_TRUE(fermi64.set_index(0x4000) < fermi64.get_nset());
     CHECK_TRUE(linear.set_index(0x1000) != xoring.set_index(0x1000) ||
                linear.set_index(0x2000) != xoring.set_index(0x2000));
 
-    CHECK_EQ(linear.set_index(0x12340), 13u);
-    CHECK_EQ(xoring.set_index(0x12340), 5u);
-    CHECK_EQ(ipoly.set_index(0x12340), 9u);
-    CHECK_EQ(custom.set_index(0x12340), 0u);
-    CHECK_EQ(fermi.set_index(0x12340), 12u);
-    CHECK_EQ(fermi.set_index(0x2000), 1u);
+    const set_index_golden golden[] = {
+        {0x00000000ull, 0u, 0u, 0u, 0u, 0u, 0u},
+        {0x00000040ull, 1u, 1u, 0u, 0u, 1u, 1u},
+        {0x000007c0ull, 15u, 14u, 7u, 0u, 31u, 31u},
+        {0x00001000ull, 0u, 4u, 5u, 0u, 0u, 32u},
+        {0x00012340ull, 13u, 5u, 9u, 0u, 12u, 12u},
+        {0x00020000ull, 0u, 0u, 7u, 0u, 8u, 8u},
+        {0x00080000ull, 0u, 0u, 6u, 0u, 16u, 16u},
+        {0x0abcdef0ull, 11u, 12u, 2u, 0u, 13u, 45u},
+        {0xfffffffcull, 15u, 0u, 9u, 0u, 0u, 32u},
+    };
+    for (const set_index_golden &entry : golden) {
+        CHECK_EQ(linear.set_index(entry.addr), entry.linear);
+        CHECK_EQ(xoring.set_index(entry.addr), entry.xoring);
+        CHECK_EQ(ipoly.set_index(entry.addr), entry.ipoly);
+        CHECK_EQ(custom.set_index(entry.addr), entry.custom);
+        CHECK_EQ(fermi.set_index(entry.addr), entry.fermi32);
+        CHECK_EQ(fermi64.set_index(entry.addr), entry.fermi64);
+    }
 }
 
 TEST(tag_fill_hit_reserved_and_sector_miss)
