@@ -24,4 +24,8 @@
 2. texture cache 多请求返回顺序和 result FIFO 长序列。
 3. data/fill port timing 精确断言。
 4. 更长、更复杂读写混合的 differential/property trace。
-5. coverage 采集方式需继续处理 `llvm-cov` profile mismatch 警告。
+5. 更高 branch coverage 的 directed 异常路径和状态组合。
+
+## 工具诊断
+
+`llvm-cov` 在合并 unit、scenario、whitebox 三个测试 binary 的 profile 时会报告 `functions have mismatched data`。`coverage.sh` 已将原始诊断保存到 `coverage/coverage-warnings.txt`，并在 `coverage-summary.txt` 末尾写入说明；覆盖率表仍来自三类测试 profile 的合并结果。

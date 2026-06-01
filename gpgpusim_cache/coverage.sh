@@ -36,7 +36,19 @@ if [ -n "$LLVM_PROFDATA" ] && [ -n "$LLVM_COV" ]; then
         -object "$OUT_DIR/test_cache_whitebox_cov" \
         -instr-profile "$OUT_DIR/coverage.profdata" \
         gpgpu_cache/gpu_cache_ref.cc gpgpu_cache/gpu_cache_ref.h \
-        | tee "$OUT_DIR/coverage-summary.txt"
+        > "$OUT_DIR/coverage-summary.txt" \
+        2> "$OUT_DIR/coverage-warnings.txt"
+    cat "$OUT_DIR/coverage-summary.txt"
+    if grep -q "functions have mismatched data" "$OUT_DIR/coverage-warnings.txt"; then
+        {
+            echo
+            echo "Note: llvm-cov reported mismatched function data while merging profiles from multiple test binaries."
+            echo "The raw diagnostic is saved in $OUT_DIR/coverage-warnings.txt."
+            echo "The coverage table above is still generated from all unit/scenario/whitebox profiles."
+        } | tee -a "$OUT_DIR/coverage-summary.txt"
+    elif [ -s "$OUT_DIR/coverage-warnings.txt" ]; then
+        cat "$OUT_DIR/coverage-warnings.txt" >&2
+    fi
     exit 0
 fi
 
