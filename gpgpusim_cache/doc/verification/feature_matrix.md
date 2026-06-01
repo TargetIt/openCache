@@ -51,7 +51,7 @@
 | F-STATS-003 | per-window stats | 统计 | clear_pw/get_sub_stats_pw | TC-STATS-003 |
 | F-FUNC-001 | DataStore read/write | functional | zero default、partial write preserve | TC-FUNC-001 |
 | F-FUNC-002 | timing/functional 双模型 | 用户场景 | miss fill copies data, hit reads L1 | TC-FUNC-002 |
-| F-PROP-001 | deterministic trace | 随机/回归 | fixed seed 稳定、不变量 | TC-PROP-001 |
+| F-PROP-001 | deterministic trace | 随机/回归 | fixed seed 和多 seed 稳定、不变量 | TC-PROP-001, TC-PROP-002 |
 | F-REG-001 | 一键回归 | 流程 | run.sh 构建所有测试并通过 | TC-REG-001 |
 | F-COV-001 | 覆盖率统计 | 流程 | coverage 脚本生成报告或说明不可用 | TC-COV-001 |
 

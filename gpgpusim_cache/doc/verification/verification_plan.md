@@ -14,7 +14,7 @@
 | gem5 Replacement Policies: https://www.gem5.org/documentation/general_docs/memory_system/replacement_policies/ | 将 reset/touch/invalidate/getVictim 语义拆成可观测行为 | 针对 LRU/FIFO、invalid-first、flush/invalidate 构造白盒测试 |
 | gem5 Indexing Policies: https://www.gem5.org/documentation/general_docs/memory_system/indexing_policies/ | 将 set index function 作为独立风险点 | 覆盖范围、差异和选定地址 golden 值 |
 | GPGPU-Sim cache 模型 | 数据 cache、texture cache、MSHR、sector cache、write policy 与事件模型 | 按 GPGPU-Sim 的配置字符串、写策略、sector/texture 管线构造白盒测试 |
-| ChampSim: https://github.com/ChampSim/ChampSim 与 https://champsim.github.io/ChampSim/ | 用固定 trace 和固定 seed 的回归保护替换策略与命中率 | 增加固定 seed 的 deterministic trace/property 测试 |
+| ChampSim: https://github.com/ChampSim/ChampSim 与 https://champsim.github.io/ChampSim/ | 用固定 trace 和固定 seed 的回归保护替换策略与命中率 | 增加 fixed seed 与多 seed deterministic trace/property 测试 |
 | 经典 cache 测试方法 | compulsory/capacity/conflict miss、LRU/FIFO victim、write-through/write-back、flush/invalidate、backpressure | 按 feature 建立 directed tests、边界 tests、随机 tests 和场景集成 tests |
 
 ## 验证范围
@@ -36,7 +36,7 @@
 
 1. Directed whitebox tests：对每个状态机和策略路径构造精确输入，断言返回状态、事件、统计和内部 block 状态。
 2. Scenario integration tests：保留用户视角的 L1/L2、multi-L1 shared L2、DataStore 双模型示例，但强化断言。
-3. Property tests：固定 seed 生成地址和读写序列，校验不变量，例如稳定复现、访问数统计、miss+hit 分类一致。
+3. Property tests：固定 seed 和多 seed 生成地址序列，校验不变量，例如稳定复现、访问数统计、miss 上界和 reservation fail 行为。
 4. Negative/death tests：对非法配置和 assert 路径使用子进程隔离，纳入默认回归，避免 abort 中断主测试进程。
 5. Regression script：默认一键跑全部非 death 测试；覆盖率脚本在工具可用时生成报告。
 
@@ -69,7 +69,7 @@
 | Line | 66.27% |
 | Branch | 55.85% |
 
-当前覆盖率未达到长期目标。原因是本阶段优先补齐默认回归、白盒关键路径、feature/testcase 追踪、death test 和覆盖率基础设施；更多 sector/texture backpressure、更多 hash golden 地址和随机 differential 长跑仍需后续迭代。覆盖率报告由 `gpgpusim_cache/coverage.sh` 生成，提交中固化的基线见 `coverage_baseline.md`。death tests 通过子进程验证 abort/assert 路径，默认不计入 coverage，以避免 abort profile 造成覆盖率文件不稳定。
+当前覆盖率未达到长期目标。原因是本阶段优先补齐默认回归、白盒关键路径、feature/testcase 追踪、death test 和覆盖率基础设施；更多 sector/texture backpressure、更多 hash golden 地址和复杂 differential 长跑仍需后续迭代。覆盖率报告由 `gpgpusim_cache/coverage.sh` 生成，提交中固化的基线见 `coverage_baseline.md`。death tests 通过子进程验证 abort/assert 路径，默认不计入 coverage，以避免 abort profile 造成覆盖率文件不稳定。
 
 ## 迭代准则
 

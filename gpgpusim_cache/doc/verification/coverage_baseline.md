@@ -24,5 +24,5 @@
 2. texture cache 多请求返回顺序和 result FIFO 长序列。
 3. data/fill port timing 精确断言。
 4. 更大地址集的 hash function golden 对照。
-5. 更长 seed 集的 differential/property trace。
+5. 更长、更复杂读写混合的 differential/property trace。
 6. coverage 采集方式需继续处理 `llvm-cov` profile mismatch 警告。

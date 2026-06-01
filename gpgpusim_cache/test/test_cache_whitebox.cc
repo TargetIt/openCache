@@ -772,6 +772,59 @@ TEST(stats_datastore_property_trace)
     CHECK_EQ(prop_stats.res_fails, 0ull);
 }
 
+struct property_result {
+    cache_sub_stats stats;
+    unsigned accepted;
+};
+
+static property_result run_read_only_seed(unsigned seed, unsigned iterations)
+{
+    simple_mem_interface mem(2048);
+    gpgpu_sim gpu;
+    cache_config cfg = make_config("N:64:64:4,L:R:m:N:L,A:64:8,128");
+    read_only_cache cache("SeedProp", cfg, 0, 0, &mem, IN_L1C_MISS_QUEUE,
+                          OTHER_GPU_CACHE, &gpu);
+    std::mt19937 rng(seed);
+    unsigned accepted = 0;
+    for (unsigned i = 0; i < iterations; ++i) {
+        new_addr_type addr = (rng() % 16384) & ~0x3ull;
+        mem_fetch *mf = new_mf(addr, 4, false, GLOBAL_ACC_R, i);
+        std::list<cache_event> events;
+        cache_request_status status = cache.access(mf->get_addr(), mf, i, events);
+        if (status != RESERVATION_FAIL)
+            accepted++;
+        drain_one_level(cache, mem, i);
+    }
+
+    cache_sub_stats stats;
+    cache.get_sub_stats(stats);
+    property_result result;
+    result.stats = stats;
+    result.accepted = accepted;
+    return result;
+}
+
+TEST(multi_seed_differential_property_trace)
+{
+    const unsigned seeds[] = {0xCACE2026u, 0x12345678u, 0xA5A5A5A5u,
+                              0x0000BEEFu, 0xDEADBEEFu};
+    for (unsigned seed : seeds) {
+        property_result first = run_read_only_seed(seed, 512);
+        property_result second = run_read_only_seed(seed, 512);
+        CHECK_EQ(first.stats.accesses, (unsigned long long)first.accepted);
+        CHECK_EQ(second.stats.accesses, (unsigned long long)second.accepted);
+        CHECK_EQ(first.stats.res_fails, 0ull);
+        CHECK_EQ(second.stats.res_fails, 0ull);
+        CHECK_TRUE(first.stats.misses <= first.stats.accesses);
+        CHECK_EQ(first.stats.accesses, second.stats.accesses);
+        CHECK_EQ(first.stats.misses, second.stats.misses);
+        CHECK_EQ(first.stats.pending_hits, second.stats.pending_hits);
+        CHECK_EQ(first.stats.res_fails, second.stats.res_fails);
+        CHECK_TRUE(first.stats.accesses > 0);
+        CHECK_TRUE(first.stats.misses > 0);
+    }
+}
+
 TEST(port_timing_visibility)
 {
     simple_mem_interface mem(64);
@@ -827,6 +880,7 @@ int main()
     RUN_TEST(sector_dirty_masks_and_writeback);
     RUN_TEST(texture_pipeline_and_backpressure);
     RUN_TEST(stats_datastore_property_trace);
+    RUN_TEST(multi_seed_differential_property_trace);
     RUN_TEST(port_timing_visibility);
 
     printf("\n========== Results: %d/%d tests passed ==========\n",
