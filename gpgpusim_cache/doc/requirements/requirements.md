@@ -54,7 +54,7 @@
 
 ### 验收标准
 
-1. `./run.sh` 通过：unit 13/13，scenario 86/86 checks，whitebox 15/15，death 6/6。
+1. `./run.sh` 通过：unit 13/13，scenario 86/86 checks，whitebox 16/16，death 6/6。
 2. `./coverage.sh` 通过并输出覆盖率摘要。
 3. Feature/testcase 文档中每条已实现 testcase 映射到测试文件。
 4. 覆盖率基线已记录，低覆盖区域作为后续迭代输入。
@@ -70,10 +70,10 @@
 
 | 指标 | 覆盖率 |
 |------|--------|
-| Region | 51.49% |
+| Region | 52.44% |
 | Function | 69.62% |
-| Line | 66.27% |
-| Branch | 56.15% |
+| Line | 66.97% |
+| Branch | 57.13% |
 
 ### 更新时间
 

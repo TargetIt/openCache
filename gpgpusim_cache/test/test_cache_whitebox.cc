@@ -100,6 +100,20 @@ static mem_fetch *new_mf(new_addr_type addr, unsigned size, bool wr,
     return new mem_fetch(access, inst, 0, 0, 0, 0, 0, NULL, cycle);
 }
 
+static mem_fetch *new_child_mf(new_addr_type addr, unsigned size, bool wr,
+                               mem_access_type type, mem_fetch *original,
+                               unsigned cycle = 0,
+                               mem_access_sector_mask_t sm = sector_mask(0),
+                               mem_access_byte_mask_t bm = byte_mask_range(0, MAX_MEMORY_ACCESS_SIZE))
+{
+    mem_access_t access(type, addr, size, wr, active_mask_t(), bm, sm);
+    warp_inst_t *inst = new warp_inst_t();
+    inst->m_is_load = !wr;
+    inst->m_is_store = wr;
+    inst->m_is_write = wr;
+    return new mem_fetch(access, inst, 0, 0, 0, 0, 0, NULL, cycle, original);
+}
+
 static bool has_event(const std::list<cache_event> &events, cache_event_type type)
 {
     for (const cache_event &event : events)
@@ -731,6 +745,74 @@ TEST(texture_pipeline_and_backpressure)
     CHECK_TRUE(rf.next_access() == rf_hit);
 }
 
+TEST(texture_sector_pending_and_return_order)
+{
+    simple_mem_interface sector_mem(64);
+    cache_config sector_cfg = make_config("S:4:128:4,L:R:m:N:L,T:4:2,4:2");
+    tex_cache sector_cache("TexSector", sector_cfg, 0, 0, &sector_mem,
+                           IN_L1T_MISS_QUEUE, IN_SHADER_L1T_ROB);
+    std::list<cache_event> events;
+    mem_fetch *sector_req = new_mf(0x4000, 4, false, TEXTURE_ACC_R, 1);
+    CHECK_EQ(sector_cache.access(sector_req->get_addr(), sector_req, 1, events),
+             MISS);
+    CHECK_TRUE(has_event(events, READ_REQUEST_SENT));
+    sector_cache.cycle();
+    CHECK_EQ(sector_mem.queue.size(), 1u);
+    CHECK_TRUE(sector_mem.queue.front() == sector_req);
+    sector_mem.queue.pop_front();
+
+    for (unsigned sector = 0; sector < 3; ++sector) {
+        mem_fetch *partial_resp = new_child_mf(0x4000 + sector * SECTOR_SIZE,
+                                               SECTOR_SIZE, false,
+                                               TEXTURE_ACC_R, sector_req,
+                                               2 + sector, sector_mask(sector),
+                                               byte_mask_range(sector * SECTOR_SIZE,
+                                                               SECTOR_SIZE));
+        sector_cache.fill(partial_resp, 2 + sector);
+        sector_cache.cycle();
+        CHECK_FALSE(sector_cache.access_ready());
+    }
+    mem_fetch *final_resp = new_child_mf(0x4000 + 3 * SECTOR_SIZE, SECTOR_SIZE,
+                                         false, TEXTURE_ACC_R, sector_req, 5,
+                                         sector_mask(3),
+                                         byte_mask_range(3 * SECTOR_SIZE,
+                                                         SECTOR_SIZE));
+    sector_cache.fill(final_resp, 5);
+    sector_cache.cycle();
+    CHECK_TRUE(sector_cache.access_ready());
+    CHECK_TRUE(sector_cache.next_access() == sector_req);
+
+    simple_mem_interface order_mem(64);
+    cache_config order_cfg = make_config("N:8:128:4,L:R:m:N:L,F:4:4,4:4");
+    tex_cache order_cache("TexOrder", order_cfg, 0, 0, &order_mem,
+                          IN_L1T_MISS_QUEUE, IN_SHADER_L1T_ROB);
+    events.clear();
+    mem_fetch *first = new_mf(0x5000, 4, false, TEXTURE_ACC_R, 10);
+    mem_fetch *second = new_mf(0x5080, 4, false, TEXTURE_ACC_R, 11);
+    CHECK_EQ(order_cache.access(first->get_addr(), first, 10, events), MISS);
+    events.clear();
+    CHECK_EQ(order_cache.access(second->get_addr(), second, 11, events), MISS);
+    order_cache.cycle();
+    CHECK_EQ(order_mem.queue.size(), 1u);
+    CHECK_TRUE(order_mem.queue.front() == first);
+    order_mem.queue.pop_front();
+    order_cache.cycle();
+    CHECK_EQ(order_mem.queue.size(), 1u);
+    CHECK_TRUE(order_mem.queue.front() == second);
+    order_mem.queue.pop_front();
+
+    order_cache.fill(second, 12);
+    order_cache.cycle();
+    CHECK_FALSE(order_cache.access_ready());
+    order_cache.fill(first, 13);
+    order_cache.cycle();
+    CHECK_TRUE(order_cache.access_ready());
+    CHECK_TRUE(order_cache.next_access() == first);
+    order_cache.cycle();
+    CHECK_TRUE(order_cache.access_ready());
+    CHECK_TRUE(order_cache.next_access() == second);
+}
+
 TEST(stats_datastore_property_trace)
 {
     cache_stats stats;
@@ -904,6 +986,7 @@ int main()
     RUN_TEST(write_miss_events_and_writeback);
     RUN_TEST(sector_dirty_masks_and_writeback);
     RUN_TEST(texture_pipeline_and_backpressure);
+    RUN_TEST(texture_sector_pending_and_return_order);
     RUN_TEST(stats_datastore_property_trace);
     RUN_TEST(multi_seed_differential_property_trace);
     RUN_TEST(port_timing_visibility);

@@ -42,9 +42,9 @@
 | F-WR-006 | dirty eviction writeback | 白盒 | WRITE_BACK_REQUEST_SENT + evicted info | TC-WR-006 |
 | F-WR-007 | lazy fetch partial write | 白盒 | partial unreadable/readable behavior | TC-WR-007 |
 | F-L1L2-001 | L1/L2 class parity | 用户场景 | l1/l2 access common behavior | TC-SCEN-001 |
-| F-TEX-001 | texture miss pipeline | 用户场景/白盒 | request fifo、ROB、fill、result fifo | TC-TEX-001 |
+| F-TEX-001 | texture miss pipeline | 用户场景/白盒 | request fifo、ROB、fill、result fifo、SECTOR_TEX_FIFO pending_read | TC-TEX-001, TC-TEX-004 |
 | F-TEX-002 | texture hit reserved | 白盒 | hit 返回 HIT_RESERVED，经 fifo ready | TC-TEX-002 |
-| F-TEX-003 | texture backpressure | 异常 | fifo/ROB full -> RESERVATION_FAIL | TC-TEX-003 |
+| F-TEX-003 | texture backpressure/order | 异常/白盒 | fifo/ROB full -> RESERVATION_FAIL、result FIFO backpressure、ROB 返回顺序 | TC-TEX-003, TC-TEX-004 |
 | F-BW-001 | data/fill port | 性能 | port occupied/free | TC-BW-001 |
 | F-STATS-001 | cache stats 基础 | 统计 | accesses/misses/pending/res fails | TC-STATS-001 |
 | F-STATS-002 | fail stats | 统计 | reservation fail reason 精确查询 | TC-STATS-002 |
