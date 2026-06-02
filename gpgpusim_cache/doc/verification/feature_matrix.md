@@ -52,6 +52,9 @@
 | F-HITLAT-010 | line refcount/pin | 白盒/一致性 | pending hit/miss response 未读走前 line 不可被 replacement 替换 | TC-HITLAT-013, TC-HITLAT-014, TC-HITLAT-015 |
 | F-HITLAT-011 | MSHR merge refcount | 白盒/一致性 | merged request 按 accepted mf 数量 pin/unpin | TC-HITLAT-016 |
 | F-HITLAT-012 | sector line-level pin | 白盒/一致性 | sector cache 任一 sector pending 时整条 line 不可被替换 | TC-HITLAT-017 |
+| F-HITLAT-013 | write-evict pinned invalid | 白盒/风险 | write-evict hit 立即 invalid 但仍 pinned 时不能作为 victim | TC-HITLAT-018 |
+| F-HITLAT-014 | bounded hit response queue | 异常/风险 | hit response queue 有限容量和背压 | TC-HITLAT-019 |
+| F-HITLAT-015 | DataStore snapshot timing | functional/风险 | hit accepted 时快照语义与延迟 token 返回不混淆 | TC-HITLAT-020 |
 | F-WR-001 | write-back hit | 白盒 | dirty no lower write | TC-WR-001 |
 | F-WR-002 | write-through hit | 白盒 | WRITE_REQUEST_SENT | TC-WR-002 |
 | F-WR-003 | write-evict hit | 白盒 | write event + invalidation | TC-WR-003 |
@@ -80,3 +83,24 @@
 2. 新增 testcase 必须回填本表。
 3. 如果 testcase 暂未实现，必须在 `testcase_matrix.md` 中标记 `Planned` 并说明原因。
 4. 默认回归中未执行的 testcase 不能标记为 `Implemented`。
+5. 新增和待实现 feature 必须按配置、输入、流程、输出四个维度补充到“四维 Feature 规划”。
+
+## 四维 Feature 规划
+
+| Feature ID | 配置 | 输入 | 流程 | 输出 |
+|------------|------|------|------|------|
+| F-HITLAT-001 | 默认旧模式；开启 `m_defer_hit_response` 新模式 | 同一 hit trace，在两种模式下运行 | 对比 `access()`、`access_ready()`、`next_access()` 行为 | 旧模式保持兼容；新模式 `HIT` 不代表数据 ready |
+| F-HITLAT-002 | read-only cache；新模式开启；指定 `data_port_width` | warm line 后发起 read hit | hit 入 response queue，cycle 推进到延迟结束 | `access()` 返回 `HIT`；延迟后 `next_access()` 返回原 mf |
+| F-HITLAT-003 | data/l1/l2 cache；新模式开启；窄/宽 data port | warm line 后发起 data read hit | tag/LRU 更新，pin line，hit response queue 延迟返回 | read hit exactly-once 返回，延迟符合 `ceil(data_size/data_port_width)` |
+| F-HITLAT-004 | WB/WT/WE/local-global 写策略；新模式开启 | 对已 warm line 发起 write hit | 执行写策略事件和 tag/dirty/invalidate 处理，进入 response queue | 写 hit 完成 token 延迟返回，策略事件保持正确 |
+| F-HITLAT-005 | 新模式开启；可控制 hit ready 和 miss fill ready 同周期 | pending miss 与 delayed hit 交错输入 | 同周期 ready 时按设计顺序调用 `next_access()` | ready 顺序稳定，不丢不重 |
+| F-HITLAT-006 | 新模式开启；启用统计和 port 采样 | hit/miss 混合 trace | accepted、ready、stats、data port busy 全程采样 | hit/miss stats 不变；ready 数等于 accepted 完成数；无双重计数 |
+| F-HITLAT-007 | texture cache 原配置 | texture miss/hit-reserved trace | 保持 fragment/result FIFO 路径 | 现有 `HIT_RESERVED -> next_access()` 行为不回退 |
+| F-HITLAT-008 | hit response queue 配置有限容量 | 超过容量的连续 hit | queue 满时继续访问 | 返回 `RESERVATION_FAIL`，fail reason 与设计一致 |
+| F-HITLAT-009 | DataStore 双模型场景；新模式开启 | read/write functional trace | 只改变 timing token ready，不改变 payload 读取模型 | DataStore 场景通过，文档化“读出即快照” |
+| F-HITLAT-010 | line-level refcount/pin 开启 | pending hit/miss 后同 set conflict miss | replacement 选 victim 前检查 refcount | refcount 非 0 的 line 不可替换 |
+| F-HITLAT-011 | MSHR merge；新模式开启 | 同 line 多个 merged miss | 每个 accepted mf pin，ready 后逐个 unpin | refcount 按请求数增减，最后归零 |
+| F-HITLAT-012 | sector cache；line-level pin | 某 sector pending，另一个请求触发同 line/set 替换 | 任一 sector pending 时保护整条 line | 整条 line 不作为 victim |
+| F-HITLAT-013 | write-evict hit；立即 invalid 但保持 pin | write-evict hit 后插入同 set conflict miss | victim 选择先查 refcount，再查 invalid 状态 | pinned invalid line 不能复用 |
+| F-HITLAT-014 | 有限 hit response queue；容量边界 | 连续 hit 填满 queue，再发起额外 hit | 触发 backpressure，drain 后再访问 | queue 满时 fail，drain 后恢复接收 |
+| F-HITLAT-015 | DataStore 快照语义；未来 payload 场景 | hit accepted 后延迟期间插入同地址写 | 固化读快照时机，token 延迟交付 | 返回 accepted 时刻快照，不误判为 coherence 行为 |

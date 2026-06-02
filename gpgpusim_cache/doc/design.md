@@ -267,6 +267,11 @@ cycle N+k: token 通过 next_access() 返回
 4. MSHR merge 多个 miss ready，refcount 逐个释放。
 5. sector cache 中某 sector pending 时整条 line 不可被 victim。
 6. replacement fail reason 能区分 pinned 和 reserved，或文档说明复用原因。
+7. write-evict hit 立即 invalid 但仍 pinned 时，同 set miss 不能复用该 invalid line。
+8. bounded hit response queue 满时必须产生 backpressure，drain 后恢复接收。
+9. DataStore hit accepted 时快照语义必须用场景测试或文档化断言固定。
+
+所有新增 testcase 必须按配置、输入、流程、输出四个维度记录到 `doc/verification/testcase_matrix.md`。
 
 ### 设计状态
 

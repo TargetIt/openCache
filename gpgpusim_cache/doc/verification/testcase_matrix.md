@@ -53,6 +53,9 @@
 | TC-HITLAT-015 | F-HITLAT-010 | unit | Planned | `test/test_cache_whitebox.cc` | same line 多个 hit pending 时 refcount 按数量增加，并逐个 `next_access()` 递减 |
 | TC-HITLAT-016 | F-HITLAT-011 | unit | Planned | `test/test_cache_whitebox.cc` | MSHR merge 多个 miss ready 时，每个 accepted mf 都 pin，逐个返回后 unpin |
 | TC-HITLAT-017 | F-HITLAT-012 | unit | Planned | `test/test_cache_whitebox.cc` | sector cache 中任一 sector pending response 时，整条 line 不可被 replacement 选为 victim |
+| TC-HITLAT-018 | F-HITLAT-013 | unit | Planned | `test/test_cache_whitebox.cc` | write-evict hit 立即 invalid 但仍 pinned 时，同 set miss 不能复用该 invalid line |
+| TC-HITLAT-019 | F-HITLAT-014 | unit | Planned | `test/test_cache_whitebox.cc` | hit response queue 达容量上限后返回 `RESERVATION_FAIL`，drain 后恢复接收 |
+| TC-HITLAT-020 | F-HITLAT-015 | scenario | Planned | `test/test_scenario.cc` | DataStore hit accepted 时快照语义被文档和场景测试固定，不误当成 coherence 行为 |
 | TC-WR-001 | F-WR-001 | unit | Implemented | `test/test_cache_whitebox.cc` | WB hit 不产生 lower write |
 | TC-WR-002 | F-WR-002 | unit | Implemented | `test/test_cache_whitebox.cc` | WT hit 产生 WRITE_REQUEST_SENT |
 | TC-WR-003 | F-WR-003 | unit | Implemented | `test/test_cache_whitebox.cc` | WE hit 后读同地址 miss |
@@ -91,3 +94,28 @@
 | step3-step7 | 通过，新增白盒和 death 覆盖关键架构风险；参数矩阵和 sequence matrix 已纳入；覆盖率需后续继续提升 | 通过，run.sh/CMake/coverage.sh 均纳入 | 通过，默认回归 13+10+26+16 全通过 | 通过，文档和追踪矩阵已刷新 |
 | sequence matrix | 通过，补齐 same line/set/cache/sector/MSHR/texture 序列风险 | 通过，用例以显式状态序列驱动，不依赖随机统计 | 通过，新增 5 条白盒用例并反标 feature | 通过，默认回归 13+10+26+16 全通过，coverage 基线已刷新 |
 | hit response strategy | 通过，接口语义变化和受影响范围已列出 | 通过，推荐兼容开关和复用 access_ready/next_access | 通过，planned testcase 覆盖 read-only/data/write/顺序/统计/backpressure | 通过，文档阶段完成，不声称实现完成 |
+
+## 四维 Testcase 规划
+
+| Testcase ID | 配置 | 输入 | 流程 | 输出 |
+|-------------|------|------|------|------|
+| TC-HITLAT-001 | 默认旧模式；新模式关闭 | warm line 后发起 read/write hit | 执行现有回归路径 | 历史 hit 行为保持兼容 |
+| TC-HITLAT-002 | read-only cache；新模式开启；固定 data port | miss warm 后同 line read hit | `access()` 返回后立即查 ready，再 cycle 到延迟结束 | 同周期未 ready，延迟后 `next_access()` 返回 hit mf |
+| TC-HITLAT-003 | l1/data cache；新模式开启；多组 `data_size/data_port_width` | warm line 后 data read hit | 计算期望 latency，逐 cycle 检查 ready | ready cycle 与 `ceil(data_size/data_port_width)` 匹配 |
+| TC-HITLAT-004 | write-back data cache；新模式开启 | warm line 后 write hit | 更新 dirty/tag，hit response 延迟返回 | dirty 正确，write hit token 延迟且 exactly-once 返回 |
+| TC-HITLAT-005 | write-through/write-evict；新模式开启 | warm line 后 WT/WE write hit | 触发写事件，WE 按设计 invalid+pin | 事件正确，完成 token 延迟返回 |
+| TC-HITLAT-006 | 新模式开启；统一 ready queue | 构造同周期 hit ready 和 miss fill ready | 按设计顺序连续调用 `next_access()` | 返回顺序稳定，队列最终为空 |
+| TC-HITLAT-007 | 新模式开启；统计采样打开 | hit/miss 混合访问 | 对比 access stats、ready 计数、port busy cycles | stats 口径不变，ready 无丢失/重复，port 不双计 |
+| TC-HITLAT-008 | texture cache 原配置 | texture miss 后 hit-reserved | 跑现有 texture FIFO/ROB 流程 | texture 行为不受 data/read-only 新模式影响 |
+| TC-HITLAT-009 | 新模式开启；同一 line | `MISS -> fill -> HIT -> delayed ready -> HIT` | 检查每一步状态和 ready | 序列完整且每个 accepted 请求 exactly-once |
+| TC-HITLAT-010 | 新模式开启；固定 seed property | 多 seed hit/miss 混合 trace | 记录 accepted 集合，drain 到完成 | returned 集合等于 accepted 集合 |
+| TC-HITLAT-011 | 有限 hit response queue | 连续 hit 填满 queue，再发一个 hit | 触发 queue full，随后 drain | 满时 `RESERVATION_FAIL`，drain 后恢复 |
+| TC-HITLAT-012 | DataStore 双模型；新模式开启 | functional read/write 场景 | 只延迟 timing token，不改变 payload 模型 | DataStore 场景通过 |
+| TC-HITLAT-013 | line-level pin 开启 | hit pending 后同 set conflict miss | replacement 跳过 refcount 非 0 line | pending line 不被 evict |
+| TC-HITLAT-014 | line-level pin 开启 | hit pending，随后 `next_access()`，再 conflict miss | unpin 后重新选择 victim | refcount 归零后可替换 |
+| TC-HITLAT-015 | line-level pin 开启 | same line 多个 hit pending | 多次入队，多次 `next_access()` | refcount 逐个递减，最终归零 |
+| TC-HITLAT-016 | MSHR merge；line-level pin 开启 | 同 line 多个 miss merge | fill 后逐个 ready 返回 | refcount 按 accepted mf 数递减 |
+| TC-HITLAT-017 | sector cache；line-level pin 开启 | sector pending 后同 set conflict miss | victim 选择检查整条 line pin | 任一 sector pending 保护整条 line |
+| TC-HITLAT-018 | write-evict；line-level pin 开启 | WE hit 后立即插入同 set miss | line 已 invalid 但 refcount 非 0 | pinned invalid line 不被复用 |
+| TC-HITLAT-019 | bounded hit queue；容量边界 | queue 满、drain、再访问 | 覆盖满/非满状态转换 | backpressure 与恢复行为正确 |
+| TC-HITLAT-020 | DataStore 快照语义 | hit accepted 后延迟期间同地址写 | 固化“读出即快照”的解释性场景 | 返回 accepted 时刻快照，非 coherence 测试 |

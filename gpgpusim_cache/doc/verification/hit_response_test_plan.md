@@ -31,6 +31,9 @@
 | F-HITLAT-010 | line refcount/pin | pending hit/miss response 未读走前 line 不可被 replacement 替换 |
 | F-HITLAT-011 | MSHR merge refcount | merged request 按 accepted mf 数量 pin/unpin |
 | F-HITLAT-012 | sector line-level pin | sector cache 任一 sector pending 时整条 line 不可被替换 |
+| F-HITLAT-013 | write-evict pinned invalid | write-evict hit 立即 invalid 但仍 pinned 时不能作为 victim |
+| F-HITLAT-014 | bounded hit response queue | hit response queue 有限容量和背压 |
+| F-HITLAT-015 | DataStore snapshot timing | hit accepted 时快照语义与延迟 token 返回不混淆 |
 
 ## Planned Testcase
 
@@ -53,6 +56,9 @@
 | TC-HITLAT-015 | F-HITLAT-010 | unit | Planned | same line 多个 hit pending 时 refcount 按数量增加，并逐个 `next_access()` 递减 |
 | TC-HITLAT-016 | F-HITLAT-011 | unit | Planned | MSHR merge 多个 miss ready 时，每个 accepted mf 都 pin，逐个返回后 unpin |
 | TC-HITLAT-017 | F-HITLAT-012 | unit | Planned | sector cache 中任一 sector pending response 时，整条 line 不可被 replacement 选为 victim |
+| TC-HITLAT-018 | F-HITLAT-013 | unit | Planned | write-evict hit 立即 invalid 但仍 pinned 时，同 set miss 不能复用该 invalid line |
+| TC-HITLAT-019 | F-HITLAT-014 | unit | Planned | hit response queue 达容量上限后返回 `RESERVATION_FAIL`，drain 后恢复接收 |
+| TC-HITLAT-020 | F-HITLAT-015 | scenario | Planned | DataStore hit accepted 时快照语义被文档和场景测试固定，不误当成 coherence 行为 |
 
 ## 关键测试场景
 
