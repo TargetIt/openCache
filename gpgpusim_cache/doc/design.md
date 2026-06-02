@@ -1,0 +1,219 @@
+# gpgpusim_cache 设计文档
+
+## Hit Response 延迟返回与 Cache Line Pin 设计
+
+### 需求背景
+
+当前 `read_only_cache` 和 `data_cache` 在 tag hit 时，`access()` 直接返回 `HIT`，调用方通常认为数据已经可用。miss 路径则不同：`access()` 返回 `MISS` 只表示请求被接收；下级 `fill()` 完成后，调用方通过 `access_ready()` 和 `next_access()` 获取完成请求。
+
+新需求要求 data/read-only cache 的 hit 也拆成两个阶段：
+
+1. `access()` 完成 tag hit/miss 判定和请求接收。
+2. SRAM/data array 读延迟结束后，请求再通过 `access_ready()` / `next_access()` 返回。
+
+这个改变会引入新的生命周期风险：hit 请求已经被接收但数据尚未被上层读走时，该 cache line 不能被 replacement、conflict miss 或其他分配动作替换。
+
+### 核心设计结论
+
+必须引入 cache line pin/refcount 机制。
+
+原因：
+
+1. 现有 `RESERVED` 状态只保护 miss 分配后、fill 之前的 line。
+2. hit 延迟返回时，line 已经是 `VALID` 或 `MODIFIED`，不是 `RESERVED`。
+3. replacement 逻辑当前只跳过 reserved line，不会跳过“已有未完成 hit response”的 valid line。
+4. 如果不 pin，可能出现 hit 已接收但尚未 `next_access()`，随后同 set miss 把该 line 选为 victim 的错误。
+
+### Refcount 语义
+
+每条 cache line 维护一个 pending response refcount。
+
+| 时机 | 操作 |
+|------|------|
+| hit 请求被 cache 接收并进入 hit response queue | refcount++ |
+| miss 请求被 cache 接收并最终需要从该 line 返回 | refcount++ |
+| MSHR merge 接收同 line 多个请求 | 每个 accepted request 都 refcount++ |
+| `next_access()` 返回一个请求给上层 | 对应 line refcount-- |
+| refcount 不为 0 | line 不能被 replacement 选为 victim |
+
+推荐命名：
+
+```cpp
+unsigned m_pending_response_refcount;
+```
+
+或者在 sector cache 中保持 line-level pin：
+
+```cpp
+unsigned m_line_pending_response_refcount;
+```
+
+### Line-Level Pin 优先
+
+第一阶段采用 line-level refcount，不做 sector-level refcount。
+
+理由：
+
+1. replacement 替换的是整条 cache line。
+2. line-level pin 能安全保护所有 sector 的未完成 response。
+3. sector-level pin 虽然更精细，但容易引入 partial sector 生命周期和 dirty/readable 状态交织风险。
+
+sector cache 中，只要任意 sector 有 pending response，整条 line 都不可被 replacement 选中。
+
+### 与 RESERVED 的关系
+
+`RESERVED` 和 refcount 解决不同问题：
+
+| 机制 | 保护阶段 | 当前是否已有 |
+|------|----------|--------------|
+| `RESERVED` | miss 分配后、fill 前 | 已有 |
+| refcount/pin | 请求已接收、数据尚未 `next_access()` 返回前 | 需要新增 |
+
+miss 路径中，fill 前由 `RESERVED` 保护；fill 后如果 response 尚未被上层读走，由 refcount 继续保护。
+
+### Replacement 规则
+
+`tag_array::probe()` 选择 victim 时必须跳过 pinned line。
+
+新的 candidate 条件：
+
+```text
+line 非 RESERVED
+line refcount == 0
+line 满足 dirty victim 策略
+```
+
+如果同 set 内所有 line 都 reserved 或 pinned，则返回 `RESERVATION_FAIL`。
+
+fail reason 建议新增：
+
+```cpp
+LINE_PINNED_FAIL
+```
+
+如果短期不新增 fail reason，也必须在测试和文档中说明复用 `LINE_ALLOC_FAIL` 的原因。但从可诊断性看，推荐新增 `LINE_PINNED_FAIL`。
+
+### Hit 路径
+
+read-only hit：
+
+1. `access()` tag probe 得到 `HIT`。
+2. 更新 LRU。
+3. `pin(cache_index)`。
+4. 请求进入 hit response queue。
+5. `access()` 返回 `HIT`。
+6. 延迟结束后请求进入 ready queue。
+7. `next_access()` 返回请求并 `unpin(cache_index)`。
+
+data read hit：
+
+1. 保持 `rd_hit_base()` 的 tag/LRU/atomic 行为。
+2. `pin(cache_index)`。
+3. 请求进入 hit response queue。
+4. `next_access()` 时 unpin。
+
+data write hit：
+
+1. 保持 write policy 的 tag/dirty/event 行为。
+2. 如果该写请求需要完成 token，进入 hit response queue 并 pin。
+3. `next_access()` 时 unpin。
+
+### Miss 路径
+
+miss accepted：
+
+1. `tag_array::access()` 分配 line 并置 `RESERVED`。
+2. 对每个 accepted miss request 记录其目标 cache index 或 block addr。
+3. `pin(cache_index)`。
+4. 下级 fill 到达后，line 从 `RESERVED` 变为 `VALID/MODIFIED`。
+5. 请求进入 ready queue。
+6. 每次 `next_access()` 返回一个 merged request 时 `unpin(cache_index)`。
+
+MSHR merge 注意事项：
+
+1. 同一个 MSHR entry 可能有多个 `mem_fetch`。
+2. 每个 accepted `mem_fetch` 都代表一个未来 response。
+3. refcount 必须按 accepted request 数增加，而不是按 line 或 MSHR entry 只增加一次。
+
+### Ready Queue 设计
+
+推荐统一 ready queue：
+
+```cpp
+struct ready_response_entry {
+  mem_fetch *mf;
+  unsigned cache_index;
+};
+
+std::list<ready_response_entry> m_ready_response_queue;
+```
+
+`next_access()` 从统一 ready queue 弹出，并执行：
+
+```text
+entry = pop_front()
+unpin(entry.cache_index)
+return entry.mf
+```
+
+这样 hit response 和 miss fill response 的 unpin 逻辑一致。
+
+### Flush/Invalidate/Write-Evict 规则
+
+必须定义 pinned line 遇到管理操作时的行为。
+
+第一阶段建议：
+
+| 操作 | pinned line 行为 |
+|------|------------------|
+| replacement victim | 禁止选择 |
+| conflict miss 分配 | 如果候选都 pinned，返回 `RESERVATION_FAIL` |
+| write-evict hit | 该请求自身进入 response queue 后，line 状态可按策略 invalidate，但必须确保 pending response 使用的 token 不再依赖 line 数据 |
+| explicit `invalidate()` | 作为强制管理操作允许执行，但测试需确认不会破坏 pending token exactly-once 返回 |
+| explicit `flush()` | dirty 写回语义保持；pinned line 不应被普通 replacement 清掉 |
+
+如果后续要求更严格，可以规定 explicit invalidate/flush 对 pinned line 返回失败或延迟执行；这需要新增接口，第一阶段不建议。
+
+### 统计与诊断
+
+`HIT` 仍在 `access()` 接收阶段计入 hit。refcount 不改变 hit/miss 统计口径。
+
+建议新增诊断统计：
+
+| 统计项 | 说明 |
+|--------|------|
+| `hit_response_pending` | 当前 pending hit response 数 |
+| `line_pinned_fail` | 因 line pinned 无 victim 导致的 reservation fail |
+| `ready_response_count` | 通过 ready queue 返回的请求数 |
+
+测试至少要断言：
+
+1. refcount 入队加一。
+2. `next_access()` 减一。
+3. refcount 非 0 时 replacement 不选该 line。
+4. MSHR merge 多请求 refcount 计数正确。
+
+### 实施阶段
+
+| 阶段 | 内容 |
+|------|------|
+| 阶段 1 | 给 cache block 增加 line-level refcount/pin API |
+| 阶段 2 | replacement 跳过 pinned line，并补 fail reason |
+| 阶段 3 | hit response queue 入队时 pin，`next_access()` 时 unpin |
+| 阶段 4 | miss/MSHR ready 路径按 accepted request pin/unpin |
+| 阶段 5 | 补充 refcount/pin directed tests 和 property tests |
+
+### 验证要求
+
+必须新增或扩展以下测试：
+
+1. hit pending 时同 set conflict miss 不能 evict 该 line。
+2. hit `next_access()` 后 refcount 归零，后续 conflict miss 可以 evict。
+3. same line 多个 hit pending，refcount 按数量增加，并逐个 `next_access()` 递减。
+4. MSHR merge 多个 miss ready，refcount 逐个释放。
+5. sector cache 中某 sector pending 时整条 line 不可被 victim。
+6. replacement fail reason 能区分 pinned 和 reserved，或文档说明复用原因。
+
+### 设计状态
+
+本文档为需求方案阶段设计，尚未进入代码实现。

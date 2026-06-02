@@ -98,16 +98,18 @@
 | GPGPUSIM-HITLAT-002 | 编写 hit response 延迟返回测试方案，覆盖 read-only/data/read hit/write hit/ready 顺序/统计/backpressure | 已完成 |
 | GPGPUSIM-HITLAT-003 | 完成项目经理、设计、验证、测试专家评审，并记录独立评审代理意见 | 已完成 |
 | GPGPUSIM-HITLAT-004 | 在 feature/testcase 文档中新增 planned 追踪项 | 已完成 |
-| GPGPUSIM-HITLAT-005 | 实现兼容开关、hit response queue 和统一 ready 返回语义 | 待开展 |
-| GPGPUSIM-HITLAT-006 | 实现 planned testcase 并刷新覆盖率与遗留问题 | 待开展 |
+| GPGPUSIM-HITLAT-005 | 在 `doc/design.md` 中补充 line-level refcount/pin 设计，确保 pending response 未读走前 line 不可被替换 | 已完成 |
+| GPGPUSIM-HITLAT-006 | 实现兼容开关、hit response queue、line pin/refcount 和统一 ready 返回语义 | 待开展 |
+| GPGPUSIM-HITLAT-007 | 实现 planned testcase 并刷新覆盖率与遗留问题 | 待开展 |
 
 ### 验收标准
 
 1. `doc/verification/hit_response_strategy.md` 存在，并明确 `HIT` 不等于数据 ready 的新语义。
 2. `doc/verification/hit_response_test_plan.md` 存在，并列出 planned testcase。
-3. Feature/testcase 文档已建立 `F-HITLAT-*` 和 `TC-HITLAT-*` 追踪。
-4. 文档阶段不修改实现代码，不把 planned testcase 标记为 implemented。
-5. 提交前 `git diff --check` 通过。
+3. `doc/design.md` 存在，并明确 line-level refcount/pin 机制。
+4. Feature/testcase 文档已建立 `F-HITLAT-*` 和 `TC-HITLAT-*` 追踪。
+5. 文档阶段不修改实现代码，不把 planned testcase 标记为 implemented。
+6. 提交前 `git diff --check` 通过。
 
 ### 更新时间
 

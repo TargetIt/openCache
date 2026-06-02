@@ -49,6 +49,9 @@
 | F-HITLAT-007 | texture cache 兼容 | 回归 | texture hit-reserved/result FIFO 行为不回退 | TC-HITLAT-008 |
 | F-HITLAT-008 | hit response backpressure | 异常 | hit response queue 满时的返回状态和 fail reason | TC-HITLAT-011 |
 | F-HITLAT-009 | DataStore 可见性 | functional | 本阶段不改变 payload 读取，只验证 timing token ready | TC-HITLAT-012 |
+| F-HITLAT-010 | line refcount/pin | 白盒/一致性 | pending hit/miss response 未读走前 line 不可被 replacement 替换 | TC-HITLAT-013, TC-HITLAT-014, TC-HITLAT-015 |
+| F-HITLAT-011 | MSHR merge refcount | 白盒/一致性 | merged request 按 accepted mf 数量 pin/unpin | TC-HITLAT-016 |
+| F-HITLAT-012 | sector line-level pin | 白盒/一致性 | sector cache 任一 sector pending 时整条 line 不可被替换 | TC-HITLAT-017 |
 | F-WR-001 | write-back hit | 白盒 | dirty no lower write | TC-WR-001 |
 | F-WR-002 | write-through hit | 白盒 | WRITE_REQUEST_SENT | TC-WR-002 |
 | F-WR-003 | write-evict hit | 白盒 | write event + invalidation | TC-WR-003 |

@@ -13,6 +13,7 @@
 5. read-only、data read hit、data write hit 都必须覆盖。
 6. texture cache 不改行为，但要保留对齐测试，证明现有 texture 模型仍通过。
 7. 每个 accepted request 必须 exactly-once 返回：不能丢、不能重复、不能提前。
+8. pending response 对应 cache line 必须被 pin，`next_access()` 前不能被 replacement 选为 victim。
 
 ## Planned Feature
 
@@ -27,6 +28,9 @@
 | F-HITLAT-007 | texture cache 兼容 | texture hit-reserved/result FIFO 行为不回退 |
 | F-HITLAT-008 | hit response backpressure | hit response queue 满时的返回状态和 fail reason |
 | F-HITLAT-009 | DataStore 可见性 | 本阶段不改变 payload 读取，只验证 timing token ready |
+| F-HITLAT-010 | line refcount/pin | pending hit/miss response 未读走前 line 不可被 replacement 替换 |
+| F-HITLAT-011 | MSHR merge refcount | merged request 按 accepted mf 数量 pin/unpin |
+| F-HITLAT-012 | sector line-level pin | sector cache 任一 sector pending 时整条 line 不可被替换 |
 
 ## Planned Testcase
 
@@ -44,6 +48,11 @@
 | TC-HITLAT-010 | F-HITLAT-002, F-HITLAT-003, F-HITLAT-006 | property | Planned | 多 seed hit/miss trace 在新模式下 accepted、ready、stats 一致且 exactly-once 返回 |
 | TC-HITLAT-011 | F-HITLAT-008 | unit | Planned | hit response queue 容量受限时返回 `RESERVATION_FAIL`，fail reason 与策略文档一致 |
 | TC-HITLAT-012 | F-HITLAT-009 | scenario | Planned | DataStore 双模型场景继续通过，证明本阶段只改变 timing token 完成时机 |
+| TC-HITLAT-013 | F-HITLAT-010 | unit | Planned | hit pending 且 refcount 非 0 时，同 set conflict miss 不能 evict 该 line |
+| TC-HITLAT-014 | F-HITLAT-010 | unit | Planned | `next_access()` 读走 hit response 后 refcount 归零，后续 conflict miss 可以 evict |
+| TC-HITLAT-015 | F-HITLAT-010 | unit | Planned | same line 多个 hit pending 时 refcount 按数量增加，并逐个 `next_access()` 递减 |
+| TC-HITLAT-016 | F-HITLAT-011 | unit | Planned | MSHR merge 多个 miss ready 时，每个 accepted mf 都 pin，逐个返回后 unpin |
+| TC-HITLAT-017 | F-HITLAT-012 | unit | Planned | sector cache 中任一 sector pending response 时，整条 line 不可被 replacement 选为 victim |
 
 ## 关键测试场景
 
@@ -103,6 +112,15 @@
 4. queue drain 后后续 hit 可再次接收。
 
 如果第一阶段使用无界 hit response queue，则 `TC-HITLAT-011` 保持 Planned，并在实现说明中写明原因。
+
+### Refcount / pin
+
+1. hit 被接收并进入 hit response queue 后，对应 line refcount 加一。
+2. `next_access()` 返回 hit mf 后，对应 line refcount 减一。
+3. refcount 不为 0 时，replacement candidate 选择必须跳过该 line。
+4. 如果同 set 所有 line 都 reserved 或 pinned，新的 miss 返回 `RESERVATION_FAIL`。
+5. MSHR merge 场景按 accepted mf 个数增加 refcount，而不是按 line 只加一次。
+6. sector cache 第一阶段使用 line-level pin，任一 sector pending 会保护整条 line。
 
 ## 回归要求
 

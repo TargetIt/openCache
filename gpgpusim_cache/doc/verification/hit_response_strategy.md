@@ -14,7 +14,8 @@ miss 路径已经不同：`access()` 返回 `MISS` 只表示请求被接收并�
 2. 复用 `access_ready()` / `next_access()` 作为统一完成接口，避免新增上层调度接口。
 3. 保持 miss fill ready 路径原有语义。
 4. 支持按 `m_data_port_width` 和请求数据大小建模 hit 返回延迟。
-5. 提供兼容开关，避免一次性破坏现有用户和测试对 `HIT` 的旧语义假设。
+5. 引入 line-level refcount/pin，确保 pending response 未被 `next_access()` 读走前，cache line 不能被 replacement 分配给其他请求。
+6. 提供兼容开关，避免一次性破坏现有用户和测试对 `HIT` 的旧语义假设。
 
 ## 受影响范围
 
@@ -114,7 +115,35 @@ cycles = ceil(mf->get_data_size() / m_config.m_data_port_width);
 
 第一阶段可以使用无界内部队列降低实现风险，但测试计划仍保留 backpressure testcase 作为后续扩展项。
 
-### 4. `cycle()` 推进 hit response
+### 4. 增加 line-level refcount/pin
+
+hit 延迟返回会让 valid line 出现新的 pending 状态：tag 已经命中，请求已被接收，但数据还没有通过 `next_access()` 返回给上层。此时如果 replacement 把该 line 选为 victim，会破坏请求语义。
+
+因此必须给 cache line 增加 pending response refcount。
+
+| 时机 | 操作 |
+|------|------|
+| hit 请求进入 hit response queue | refcount++ |
+| miss 请求被接收且未来会从该 line 返回 | refcount++ |
+| MSHR merge 接收多个请求 | 每个 accepted request 都 refcount++ |
+| `next_access()` 返回一个请求 | 对应 line refcount-- |
+| refcount 不为 0 | line 不能被 replacement 选为 victim |
+
+第一阶段使用 line-level pin，不做 sector-level pin。sector cache 中任一 sector 有 pending response，整条 line 都不可被替换。
+
+replacement candidate 必须满足：
+
+```text
+line 非 RESERVED
+line refcount == 0
+line 满足 dirty victim 策略
+```
+
+如果同 set 内所有候选都 reserved 或 pinned，则返回 `RESERVATION_FAIL`。建议新增 fail reason `LINE_PINNED_FAIL`；如果第一阶段复用 `LINE_ALLOC_FAIL`，必须在实现说明和测试中写明。
+
+更完整的设计见 `doc/design.md`。
+
+### 5. `cycle()` 推进 hit response
 
 `baseline_cache::cycle()` 增加步骤：
 
@@ -135,20 +164,22 @@ hit response 进入 `m_ready_response_queue` 后，`access_ready()` 返回 true�
 
 推荐先采用统一 ready FIFO。`fill()` 在 mark MSHR ready 后也把 ready 请求转入统一队列，或者 `next_access()` 内部按固定规则从 hit queue 和 MSHR ready 中弹出。若第一阶段要求改动最小，可先采用 `hit ready 优先于 MSHR ready`，但必须在测试中固化该规则。
 
-### 5. hit 路径处理
+### 6. hit 路径处理
 
 `read_only_cache` hit：
 
 1. 更新 tag/LRU。
 2. 如果旧模式，保持立即完成。
-3. 如果新模式，把 `mf` 放入 hit response queue。
+3. 如果新模式，pin 对应 cache line，把 `mf` 放入 hit response queue。
 4. `access()` 仍返回 `HIT`。
+5. `next_access()` 返回该 `mf` 时 unpin。
 
 `data_cache` read hit：
 
 1. 保持 `rd_hit_base()` 的 tag 和 atomic 修改逻辑。
-2. 如果新模式，把 `mf` 放入 hit response queue。
+2. 如果新模式，pin 对应 cache line，把 `mf` 放入 hit response queue。
 3. `access()` 仍返回 `HIT`。
+4. `next_access()` 返回该 `mf` 时 unpin。
 
 `data_cache` write hit：
 
@@ -163,7 +194,7 @@ hit response 进入 `m_ready_response_queue` 后，`access_ready()` 返回 true�
 
 如果上层不需要写完成 token，可以通过配置保留旧行为；但验证文档必须覆盖写 hit 延迟的选择。
 
-### 6. 统计语义
+### 7. 统计语义
 
 `HIT` 仍计入 hit，不新增 cache_request_status。`HIT_RESERVED` 暂时不复用于 data/read-only cache，避免污染历史统计含义。
 
@@ -202,6 +233,7 @@ hit response 进入 `m_ready_response_queue` 后，`access_ready()` 返回 true�
 | texture 行为偏离 | texture 已经有独立 FIFO | 不改 texture，只做对齐测试 |
 | DataStore 可见性歧义 | hit 延迟期间若发生写入，payload 读取时机会影响结果 | 第一阶段只处理 timing token，不改变 payload |
 | 调用方漏改 | 开启新模式后只看 `HIT` 会提前完成 | 默认关闭；实现阶段增加迁移说明和 exactly-once 测试 |
+| pending response line 被替换 | hit/miss response 未被读走前，valid line 可能被 replacement 选走 | line-level refcount/pin；replacement 跳过 pinned line |
 
 ## 分阶段实施建议
 
@@ -209,10 +241,11 @@ hit response 进入 `m_ready_response_queue` 后，`access_ready()` 返回 true�
 |------|------|------|
 | 阶段 0 | 文档和评审 | 本文件、测试计划、requirements/feature/testcase planned 追踪 |
 | 阶段 1 | 增加兼容开关和 hit response queue | 默认旧行为不变，新模式测试通过 |
-| 阶段 2 | 扩展 read-only/data read hit 延迟返回 | 新增 read hit latency tests |
-| 阶段 3 | 扩展 write hit 延迟返回 | 新增 write hit latency tests |
-| 阶段 4 | 统一 ready ordering 和统计 | 覆盖 hit/miss 同周期 ready 顺序、统计一致性 |
-| 阶段 5 | 评估默认开启 | 更新 USER_GUIDE 和迁移说明 |
+| 阶段 2 | 增加 line-level refcount/pin，replacement 跳过 pinned line | pinned line victim 保护测试通过 |
+| 阶段 3 | 扩展 read-only/data read hit 延迟返回 | 新增 read hit latency tests |
+| 阶段 4 | 扩展 write hit 延迟返回 | 新增 write hit latency tests |
+| 阶段 5 | 统一 ready ordering 和统计 | 覆盖 hit/miss 同周期 ready 顺序、统计一致性 |
+| 阶段 6 | 评估默认开启 | 更新 USER_GUIDE 和迁移说明 |
 
 ## 多角色评审
 

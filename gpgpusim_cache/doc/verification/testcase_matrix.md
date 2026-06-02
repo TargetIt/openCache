@@ -48,6 +48,11 @@
 | TC-HITLAT-010 | F-HITLAT-002, F-HITLAT-003, F-HITLAT-006 | property | Planned | `test/test_cache_whitebox.cc` | 多 seed hit/miss trace 在新模式下 accepted、ready、stats 一致且 exactly-once 返回 |
 | TC-HITLAT-011 | F-HITLAT-008 | unit | Planned | `test/test_cache_whitebox.cc` | hit response queue 容量受限时返回 `RESERVATION_FAIL`，fail reason 与策略文档一致 |
 | TC-HITLAT-012 | F-HITLAT-009 | scenario | Planned | `test/test_scenario.cc` | DataStore 双模型场景继续通过，证明本阶段只改变 timing token 完成时机 |
+| TC-HITLAT-013 | F-HITLAT-010 | unit | Planned | `test/test_cache_whitebox.cc` | hit pending 且 refcount 非 0 时，同 set conflict miss 不能 evict 该 line |
+| TC-HITLAT-014 | F-HITLAT-010 | unit | Planned | `test/test_cache_whitebox.cc` | `next_access()` 读走 hit response 后 refcount 归零，后续 conflict miss 可以 evict |
+| TC-HITLAT-015 | F-HITLAT-010 | unit | Planned | `test/test_cache_whitebox.cc` | same line 多个 hit pending 时 refcount 按数量增加，并逐个 `next_access()` 递减 |
+| TC-HITLAT-016 | F-HITLAT-011 | unit | Planned | `test/test_cache_whitebox.cc` | MSHR merge 多个 miss ready 时，每个 accepted mf 都 pin，逐个返回后 unpin |
+| TC-HITLAT-017 | F-HITLAT-012 | unit | Planned | `test/test_cache_whitebox.cc` | sector cache 中任一 sector pending response 时，整条 line 不可被 replacement 选为 victim |
 | TC-WR-001 | F-WR-001 | unit | Implemented | `test/test_cache_whitebox.cc` | WB hit 不产生 lower write |
 | TC-WR-002 | F-WR-002 | unit | Implemented | `test/test_cache_whitebox.cc` | WT hit 产生 WRITE_REQUEST_SENT |
 | TC-WR-003 | F-WR-003 | unit | Implemented | `test/test_cache_whitebox.cc` | WE hit 后读同地址 miss |
