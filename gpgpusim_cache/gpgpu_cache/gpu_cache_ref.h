@@ -594,7 +594,7 @@ class cache_config {
     m_config_stringPrefL1 = NULL;
     m_config_stringPrefShared = NULL;
     m_data_port_width = 0;
-    m_defer_hit_response = false;
+    m_defer_hit_response = true;
     m_hit_response_queue_size = 16;
     m_set_index_function = LINEAR_SET_FUNCTION;
     m_is_streaming = false;
@@ -1014,6 +1014,7 @@ class tag_array {
 
   unsigned size() const { return m_config.get_num_lines(); }
   cache_block_t *get_block(unsigned idx) { return m_lines[idx]; }
+  bool final_state_clean() const;
 
   void flush();       // flush all written entries
   void invalidate();  // invalidate all entries
@@ -1094,6 +1095,7 @@ class mshr_table {
   void mark_ready(new_addr_type block_addr, bool &has_atomic);
   /// Returns true if ready accesses exist
   bool access_ready() const { return !m_current_response.empty(); }
+  bool empty() const { return m_data.empty() && m_current_response.empty(); }
   /// Returns next ready access
   mem_fetch *next_access();
   void display(FILE *fp) const;
@@ -1337,9 +1339,9 @@ class baseline_cache : public cache_t {
       : m_config(config),
         m_tag_array(new tag_array(config, core_id, type_id)),
         m_mshrs(config.m_mshr_entries, config.m_mshr_max_merge),
-        m_bandwidth_management(config),
         m_level(level),
-        m_gpu(gpu) {
+        m_gpu(gpu),
+        m_bandwidth_management(config) {
     init(name, config, memport, status);
   }
 
@@ -1376,6 +1378,8 @@ class baseline_cache : public cache_t {
   }
   /// Pop next ready access.
   mem_fetch *next_access();
+  bool queues_empty() const;
+  bool final_state_clean() const;
   // flash invalidate all entries in cache
   void flush() { m_tag_array->flush(); }
   void invalidate() { m_tag_array->invalidate(); }
@@ -1863,6 +1867,9 @@ class tex_cache : public cache_t {
   /// Pop next ready access (includes both accesses that "HIT" and those that
   /// "MISS")
   mem_fetch *next_access() { return m_result_fifo.pop(); }
+  void invalidate();
+  bool queues_empty() const;
+  bool final_state_clean() const;
   void display_state(FILE *fp) const;
 
   // accessors for cache bandwidth availability - stubs for now

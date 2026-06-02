@@ -36,7 +36,7 @@
 | TC-RO-001 | F-RO-001 | unit | Implemented | `test/test_cache_whitebox.cc` | read_only miss/cycle/fill/ready |
 | TC-RO-002 | F-RO-002 | unit | Implemented | `test/test_cache_whitebox.cc` | miss queue full backpressure，并精确查询 MISS_QUEUE_FULL |
 | TC-DC-001 | F-DC-001 | unit | Implemented | `test/test_cache_whitebox.cc` | data_cache read miss/hit |
-| TC-HITLAT-001 | F-HITLAT-001 | unit | Implemented | `test/test_cache_whitebox.cc` | 默认不开启 hit 延迟时，既有 hit 行为和当前回归保持一致 |
+| TC-HITLAT-001 | F-HITLAT-001 | unit | Implemented | `test/test_cache_whitebox.cc` | 默认新模式开启；显式 `set_defer_hit_response(false)` 时旧 hit 行为保持兼容 |
 | TC-HITLAT-002 | F-HITLAT-002 | unit | Implemented | `test/test_cache_whitebox.cc` | read-only cache hit 返回 `HIT`，同周期 `access_ready()==false`，延迟后 `next_access()` 返回原 mf |
 | TC-HITLAT-003 | F-HITLAT-003 | unit | Implemented | `test/test_cache_whitebox.cc` | l1/data read hit 返回 `HIT`，按 `ceil(data_size/data_port_width)` cycle 后 ready |
 | TC-HITLAT-004 | F-HITLAT-004 | unit | Implemented | `test/test_cache_whitebox.cc` | write-back hit 延迟返回，并保持 dirty/tag 更新正确 |
@@ -56,6 +56,8 @@
 | TC-HITLAT-018 | F-HITLAT-013 | unit | Implemented | `test/test_cache_whitebox.cc` | write-evict hit 立即 invalid 但仍 pinned 时，同 set miss 不能复用该 invalid line |
 | TC-HITLAT-019 | F-HITLAT-014 | unit | Implemented | `test/test_cache_whitebox.cc` | hit response queue 达容量上限后返回 `RESERVATION_FAIL`，drain 后恢复接收 |
 | TC-HITLAT-020 | F-HITLAT-015 | unit | Implemented | `test/test_cache_whitebox.cc` | DataStore hit accepted 时快照语义被文档和场景测试固定，不误当成 coherence 行为 |
+| TC-FINAL-001 | F-FINAL-001 | unit | Implemented | `test/test_cache_whitebox.cc` | baseline cache 用例收尾 drain 后，invalidate 使 queue/MSHR/pending ref 和所有 line 回初始状态 |
+| TC-FINAL-002 | F-FINAL-002 | unit | Implemented | `test/test_cache_whitebox.cc` | texture cache 用例收尾 drain 后，invalidate 使 FIFO/ROB/extra fields/tag/data block 回初始状态 |
 | TC-WR-001 | F-WR-001 | unit | Implemented | `test/test_cache_whitebox.cc` | WB hit 不产生 lower write |
 | TC-WR-002 | F-WR-002 | unit | Implemented | `test/test_cache_whitebox.cc` | WT hit 产生 WRITE_REQUEST_SENT |
 | TC-WR-003 | F-WR-003 | unit | Implemented | `test/test_cache_whitebox.cc` | WE hit 后读同地址 miss |
@@ -73,7 +75,7 @@
 | TC-TEX-004 | F-TEX-001, F-TEX-003 | unit | Implemented | `test/test_cache_whitebox.cc` | SECTOR_TEX_FIFO 多 sector response 全部返回后 ready；乱序 fill 按 ROB 顺序返回 |
 | TC-BW-001 | F-BW-001 | unit | Implemented | `test/test_cache_whitebox.cc` | data/fill port free 状态变化 |
 | TC-STATS-001 | F-STATS-001 | unit | Implemented | `test/test_main.cc` | cache_sub_stats 汇总 |
-| TC-STATS-002 | F-STATS-002 | unit | Implemented | `test/test_cache_whitebox.cc` | LINE_ALLOC_FAIL、MISS_QUEUE_FULL、MSHR_ENTRY、MSHR_MERGE、MSHR_RW_PENDING 精确查询 |
+| TC-STATS-002 | F-STATS-002 | unit | Implemented | `test/test_cache_whitebox.cc` | LINE_PINNED_FAIL、MISS_QUEUE_FULL、MSHR_ENTRY、MSHR_MERGE、MSHR_RW_PENDING 精确查询；LINE_ALLOC_FAIL 保留字符串与原始 stats 单元覆盖 |
 | TC-STATS-003 | F-STATS-003, F-TAG-006 | unit | Implemented | `test/test_cache_whitebox.cc` | window/per-window stats |
 | TC-STATS-004 | F-STATS-004 | unit | Implemented | `test/test_cache_whitebox.cc` | request/fail status 字符串表完整映射 |
 | TC-FUNC-001 | F-FUNC-001 | unit | Implemented | `test/test_cache_whitebox.cc` | DataStore 默认零、write/read、同 block partial write preserve |
@@ -82,7 +84,7 @@
 | TC-PROP-002 | F-PROP-001 | property | Implemented | `test/test_cache_whitebox.cc` | 5-seed read-only 随机 trace 重复运行差分一致，校验 accesses/misses/res_fails 不变量 |
 | TC-PROP-003 | F-PROP-001 | property | Implemented | `test/test_cache_whitebox.cc` | 4-seed read/write 混合 trace 与无驱逐 oracle 对照，校验 hit/miss、per-window read/write hit 和重复运行一致性 |
 | TC-REG-001 | F-REG-001 | regression | Implemented | `run.sh` | 一键回归 unit/scenario/whitebox/death 全部通过 |
-| TC-COV-001 | F-COV-001 | coverage | Implemented | `coverage.sh` | 生成覆盖率报告；当前 line 69.82%、function 72.86%、branch 60.30%；death 子进程 abort 路径不计入 coverage；llvm-cov mismatch 诊断落盘并写入说明 |
+| TC-COV-001 | F-COV-001 | coverage | Implemented | `coverage.sh` | 生成覆盖率报告；当前 line 70.25%、function 73.52%、branch 60.21%；death 子进程 abort 路径不计入 coverage；llvm-cov mismatch 诊断落盘并写入说明 |
 
 ## 多角色检视记录
 
@@ -99,7 +101,7 @@
 
 | Testcase ID | 配置 | 输入 | 流程 | 输出 |
 |-------------|------|------|------|------|
-| TC-HITLAT-001 | 默认旧模式；新模式关闭 | warm line 后发起 read/write hit | 执行现有回归路径 | 历史 hit 行为保持兼容 |
+| TC-HITLAT-001 | 默认新模式；显式旧模式关闭开关 | warm line 后发起 read/write hit | 默认路径验证延迟 ready；显式旧模式验证兼容行为 | 默认 `HIT` 延迟交付；旧模式历史 hit 行为保持兼容 |
 | TC-HITLAT-002 | read-only cache；新模式开启；固定 data port | miss warm 后同 line read hit | `access()` 返回后立即查 ready，再 cycle 到延迟结束 | 同周期未 ready，延迟后 `next_access()` 返回 hit mf |
 | TC-HITLAT-003 | l1/data cache；新模式开启；多组 `data_size/data_port_width` | warm line 后 data read hit | 计算期望 latency，逐 cycle 检查 ready | ready cycle 与 `ceil(data_size/data_port_width)` 匹配 |
 | TC-HITLAT-004 | write-back data cache；新模式开启 | warm line 后 write hit | 更新 dirty/tag，hit response 延迟返回 | dirty 正确，write hit token 延迟且 exactly-once 返回 |
@@ -119,3 +121,5 @@
 | TC-HITLAT-018 | write-evict；line-level pin 开启 | WE hit 后立即插入同 set miss | line 已 invalid 但 refcount 非 0 | pinned invalid line 不被复用 |
 | TC-HITLAT-019 | bounded hit queue；容量边界 | queue 满、drain、再访问 | 覆盖满/非满状态转换 | backpressure 与恢复行为正确 |
 | TC-HITLAT-020 | DataStore 快照语义 | hit accepted 后延迟期间同地址写 | 固化“读出即快照”的解释性场景 | 返回 accepted 时刻快照，非 coherence 测试 |
+| TC-FINAL-001 | baseline/read-only/data cache；默认新模式 | miss/fill/hit 后收尾 | drain、pop ready、invalidate、检查 `final_state_clean()` | queue/MSHR/pending ref 清空，所有 line invalid/unpinned |
+| TC-FINAL-002 | texture cache；默认新模式 | miss/fill/hit-reserved 后收尾 | drain FIFO/ROB/result、invalidate、检查 `final_state_clean()` | FIFO/ROB/extra fields 清空，tag/data block 回初始态 |

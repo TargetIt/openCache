@@ -5,20 +5,20 @@
 执行命令：
 
 ```bash
-./coverage.sh coverage-hitlat
+./coverage.sh coverage-final-check
 ```
 
 结果：
 
 | 文件 | Region | Function | Line | Branch |
 |------|--------|----------|------|--------|
-| `gpu_cache_ref.cc` | 52.81% | 71.29% | 67.68% | 56.71% |
-| `gpu_cache_ref.h` | 61.93% | 73.74% | 73.74% | 72.36% |
-| Total | 55.49% | 72.86% | 69.82% | 60.30% |
+| `gpu_cache_ref.cc` | 54.13% | 72.90% | 68.38% | 56.83% |
+| `gpu_cache_ref.h` | 62.10% | 73.89% | 73.77% | 72.00% |
+| Total | 56.43% | 73.52% | 70.25% | 60.21% |
 
 ## 结论
 
-当前覆盖率在 hit response 延迟返回实现后有小幅提升，但尚未达到长期质量目标。已经覆盖默认 unit、scenario 和 deep whitebox 回归；后续迭代应重点提升：
+当前覆盖率在默认新模式和 final check 实现后继续小幅提升，但尚未达到长期质量目标。已经覆盖默认 unit、scenario 和 deep whitebox 回归；后续迭代应重点提升：
 
 1. 更完整的 SECTOR_TEX_FIFO pending_read 组合。
 2. texture cache 更多 result FIFO 长序列和跨请求 backpressure 组合。
@@ -28,4 +28,4 @@
 
 ## 工具诊断
 
-`llvm-cov` 在合并 unit、scenario、whitebox 三个测试 binary 的 profile 时会报告 `functions have mismatched data`。`coverage.sh` 已将原始诊断保存到 `coverage-hitlat/coverage-warnings.txt`，并在 `coverage-summary.txt` 末尾写入说明；覆盖率表仍来自三类测试 profile 的合并结果。
+`llvm-cov` 在合并 unit、scenario、whitebox 三个测试 binary 的 profile 时会报告 `functions have mismatched data`。`coverage.sh` 已将原始诊断保存到 `coverage-final-check/coverage-warnings.txt`，并在 `coverage-summary.txt` 末尾写入说明；覆盖率表仍来自三类测试 profile 的合并结果。

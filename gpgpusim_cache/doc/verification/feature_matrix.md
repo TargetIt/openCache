@@ -40,7 +40,7 @@
 | F-RO-001 | read_only miss/hit flow | 用户场景 | access/cycle/fill/ready | TC-RO-001 |
 | F-RO-002 | read_only miss queue full | 异常 | MISS_QUEUE_FULL fail stats | TC-RO-002 |
 | F-DC-001 | data_cache read miss/hit | 用户场景 | read miss event、fill、hit | TC-DC-001 |
-| F-HITLAT-001 | hit response 配置开关 | 接口/兼容性 | 默认旧行为；开启后 hit 延迟返回 | TC-HITLAT-001 |
+| F-HITLAT-001 | hit response 配置开关 | 接口/兼容性 | 默认新模式；显式关闭后保留旧 hit 兼容行为 | TC-HITLAT-001 |
 | F-HITLAT-002 | read-only hit 延迟返回 | 接口/性能模型 | read-only hit 进入 ready queue，按 data port latency 返回 | TC-HITLAT-002 |
 | F-HITLAT-003 | data read hit 延迟返回 | 接口/性能模型 | data/l1/l2 read hit 返回 HIT 但数据经 next_access 返回 | TC-HITLAT-003, TC-HITLAT-009 |
 | F-HITLAT-004 | data write hit 延迟返回 | 接口/性能模型 | WB/WT/WE/local-global 写 hit 的完成点和 ready 行为 | TC-HITLAT-004, TC-HITLAT-005 |
@@ -55,6 +55,8 @@
 | F-HITLAT-013 | write-evict pinned invalid | 白盒/风险 | write-evict hit 立即 invalid 但仍 pinned 时不能作为 victim | TC-HITLAT-018 |
 | F-HITLAT-014 | bounded hit response queue | 异常/风险 | hit response queue 有限容量和背压 | TC-HITLAT-019 |
 | F-HITLAT-015 | DataStore snapshot timing | functional/风险 | hit accepted 时快照语义与延迟 token 返回不混淆 | TC-HITLAT-020 |
+| F-FINAL-001 | baseline cache final check | 流程/白盒 | 用例收尾 drain 后，miss queue、MSHR、hit response queue、ready queue、pending ref 与 tag line 均回到初始状态 | TC-FINAL-001 |
+| F-FINAL-002 | texture cache final check | 流程/白盒 | 用例收尾 drain 后，fragment/request/result FIFO、ROB、extra fields、tag line 与 texture data block 均回到初始状态 | TC-FINAL-002 |
 | F-WR-001 | write-back hit | 白盒 | dirty no lower write | TC-WR-001 |
 | F-WR-002 | write-through hit | 白盒 | WRITE_REQUEST_SENT | TC-WR-002 |
 | F-WR-003 | write-evict hit | 白盒 | write event + invalidation | TC-WR-003 |
@@ -89,7 +91,7 @@
 
 | Feature ID | 配置 | 输入 | 流程 | 输出 |
 |------------|------|------|------|------|
-| F-HITLAT-001 | 默认旧模式；开启 `m_defer_hit_response` 新模式 | 同一 hit trace，在两种模式下运行 | 对比 `access()`、`access_ready()`、`next_access()` 行为 | 旧模式保持兼容；新模式 `HIT` 不代表数据 ready |
+| F-HITLAT-001 | 默认新模式；通过 `set_defer_hit_response(false)` 显式关闭 | 同一 hit trace，在新模式和显式旧模式下运行 | 对比 `access()`、`access_ready()`、`next_access()` 行为 | 默认 `HIT` 不代表数据 ready；显式旧模式保持兼容 |
 | F-HITLAT-002 | read-only cache；新模式开启；指定 `data_port_width` | warm line 后发起 read hit | hit 入 response queue，cycle 推进到延迟结束 | `access()` 返回 `HIT`；延迟后 `next_access()` 返回原 mf |
 | F-HITLAT-003 | data/l1/l2 cache；新模式开启；窄/宽 data port | warm line 后发起 data read hit | tag/LRU 更新，pin line，hit response queue 延迟返回 | read hit exactly-once 返回，延迟符合 `ceil(data_size/data_port_width)` |
 | F-HITLAT-004 | WB/WT/WE/local-global 写策略；新模式开启 | 对已 warm line 发起 write hit | 执行写策略事件和 tag/dirty/invalidate 处理，进入 response queue | 写 hit 完成 token 延迟返回，策略事件保持正确 |
@@ -104,3 +106,5 @@
 | F-HITLAT-013 | write-evict hit；立即 invalid 但保持 pin | write-evict hit 后插入同 set conflict miss | victim 选择先查 refcount，再查 invalid 状态 | pinned invalid line 不能复用 |
 | F-HITLAT-014 | 有限 hit response queue；容量边界 | 连续 hit 填满 queue，再发起额外 hit | 触发 backpressure，drain 后再访问 | queue 满时 fail，drain 后恢复接收 |
 | F-HITLAT-015 | DataStore 快照语义；未来 payload 场景 | hit accepted 后延迟期间插入同地址写 | 固化读快照时机，token 延迟交付 | 返回 accepted 时刻快照，不误判为 coherence 行为 |
+| F-FINAL-001 | baseline/read-only/data cache；默认新模式 | miss/fill/hit 序列完成后收尾 | drain 到 queue/MSHR/pending response 空，随后 invalidate | `final_state_clean()==true`，所有 line invalid/unpinned，外部 mem queue 为空 |
+| F-FINAL-002 | texture cache；默认新模式 | texture miss/fill/hit-reserved 序列完成后收尾 | drain 到 FIFO/ROB/extra fields 空，随后 invalidate | `final_state_clean()==true`，tag/data block 回初始态，外部 mem queue 为空 |

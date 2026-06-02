@@ -103,6 +103,9 @@
 | GPGPUSIM-HITLAT-007 | 实现 planned testcase 并刷新覆盖率与遗留问题 | 已完成 |
 | GPGPUSIM-HITLAT-008 | 将新增和待实现 feature/testcase 按配置、输入、流程、输出四个维度补齐规划 | 已完成 |
 | GPGPUSIM-HITLAT-009 | 为 review 风险补充四维 feature/testcase 规划：write-evict pinned invalid、bounded hit response queue、DataStore 快照语义 | 已完成 |
+| GPGPUSIM-HITLAT-010 | 将交付默认模式切换为新模式，旧模式仅通过显式 `set_defer_hit_response(false)` 保留 | 已完成 |
+| GPGPUSIM-HITLAT-011 | 将默认回归用例适配到新模式，修正 hit 后未 drain 就替换的旧同步假设 | 已完成 |
+| GPGPUSIM-HITLAT-012 | 增加 final check，可检查 baseline/texture cache 收尾后 queue/FIFO/MSHR/pending ref 和 line/data block 是否回初始态 | 已完成 |
 
 ### 验收标准
 
@@ -111,9 +114,10 @@
 3. `doc/design.md` 存在，并明确 line-level refcount/pin 机制。
 4. Feature/testcase 文档已建立 `F-HITLAT-*` 和 `TC-HITLAT-*` 追踪。
 5. 新增和待实现 feature/testcase 已按配置、输入、流程、输出四维记录。
-6. 默认旧模式保持既有 hit 行为；新模式开启后 hit 经 `access_ready()/next_access()` 延迟返回。
-7. `TC-HITLAT-001..020` 已反标到白盒用例，默认 `./run.sh` 全通过。
-8. 提交前 `git diff --check` 通过。
+6. 默认新模式下 hit 经 `access_ready()/next_access()` 延迟返回；旧模式仅通过显式 `set_defer_hit_response(false)` 保持兼容。
+7. `TC-HITLAT-001..020`、`TC-FINAL-001/002` 已反标到白盒用例，默认 `./run.sh` 全通过。
+8. final check 覆盖 baseline/read-only/data cache 和 texture cache 的正常收尾路径。
+9. 提交前 `git diff --check` 通过。
 
 ### 更新时间
 
@@ -144,7 +148,7 @@
 
 ### 验收标准
 
-1. `./run.sh` 通过：unit 13/13，scenario 86/86 checks，whitebox 38/38，death 16/16。
+1. `./run.sh` 通过：unit 13/13，scenario 86/86 checks，whitebox 40/40，death 16/16。
 2. `./coverage.sh` 通过并输出覆盖率摘要。
 3. Feature/testcase 文档中每条已实现 testcase 映射到测试文件。
 4. 覆盖率基线已记录，低覆盖区域作为后续迭代输入。
@@ -160,11 +164,11 @@
 
 | 指标 | 覆盖率 |
 |------|--------|
-| Region | 55.49% |
-| Function | 72.86% |
-| Line | 69.82% |
-| Branch | 60.30% |
+| Region | 56.43% |
+| Function | 73.52% |
+| Line | 70.25% |
+| Branch | 60.21% |
 
 ### 更新时间
 
-2026-06-01
+2026-06-02

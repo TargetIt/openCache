@@ -165,14 +165,55 @@ static cache_event find_event(const std::list<cache_event> &events,
 static void drain_one_level(baseline_cache &cache, simple_mem_interface &mem,
                             unsigned cycle)
 {
-    cache.cycle();
-    while (!mem.queue.empty()) {
-        mem_fetch *resp = mem.queue.front();
-        mem.queue.pop_front();
-        cache.fill(resp, cycle);
+    for (unsigned step = 0; step < 256; ++step) {
+        cache.cycle();
+        while (!mem.queue.empty()) {
+            mem_fetch *resp = mem.queue.front();
+            mem.queue.pop_front();
+            cache.fill(resp, cycle + step);
+        }
+        while (cache.access_ready())
+            cache.next_access();
+        if (mem.queue.empty() && cache.queues_empty())
+            return;
     }
-    while (cache.access_ready())
-        cache.next_access();
+    CHECK_TRUE(false);
+}
+
+static void drain_texture(tex_cache &cache, simple_mem_interface &mem,
+                          unsigned cycle)
+{
+    for (unsigned step = 0; step < 256; ++step) {
+        cache.cycle();
+        while (!mem.queue.empty()) {
+            mem_fetch *resp = mem.queue.front();
+            mem.queue.pop_front();
+            cache.fill(resp, cycle + step);
+        }
+        while (cache.access_ready())
+            cache.next_access();
+        if (mem.queue.empty() && cache.queues_empty())
+            return;
+    }
+    CHECK_TRUE(false);
+}
+
+static void final_check(baseline_cache &cache, simple_mem_interface &mem,
+                        unsigned cycle)
+{
+    drain_one_level(cache, mem, cycle);
+    cache.invalidate();
+    CHECK_TRUE(cache.final_state_clean());
+    CHECK_TRUE(mem.queue.empty());
+}
+
+static void final_check(tex_cache &cache, simple_mem_interface &mem,
+                        unsigned cycle)
+{
+    drain_texture(cache, mem, cycle);
+    cache.invalidate();
+    CHECK_TRUE(cache.final_state_clean());
+    CHECK_TRUE(mem.queue.empty());
 }
 
 static void fill_read_only_line(read_only_cache &cache, simple_mem_interface &mem,
@@ -189,7 +230,7 @@ TEST(config_sector_and_streaming)
     cache_config normal = make_config("N:4:64:2,L:R:m:N:L,A:4:2,8");
     CHECK_EQ(normal.get_atom_sz(), 64u);
     CHECK_FALSE(normal.is_streaming());
-    CHECK_FALSE(normal.defer_hit_response());
+    CHECK_TRUE(normal.defer_hit_response());
     CHECK_EQ(normal.get_hit_response_queue_size(), 16u);
 
     cache_config sector = make_config("S:4:128:2,L:B:m:F:X,A:4:2,8");
@@ -484,6 +525,7 @@ TEST(sequence_same_set_and_full_cache_eviction)
     events.clear();
     mem_fetch *hit_set1 = new_mf(0x0044, 4, false, GLOBAL_ACC_R, 6);
     CHECK_EQ(cache.access(hit_set1->get_addr(), hit_set1, 6, events), HIT);
+    drain_one_level(cache, mem, 7);
 
     events.clear();
     mem_fetch *conflict_set0 = new_mf(0x0080, 4, false, GLOBAL_ACC_R, 7);
@@ -843,7 +885,7 @@ TEST(fail_reason_counters)
         mem_fetch *conflict = new_mf(0x0040, 4, false, GLOBAL_ACC_R);
         CHECK_EQ(cache.access(conflict->get_addr(), conflict, 2, events),
                  RESERVATION_FAIL);
-        CHECK_EQ(cache.get_fail_stats(GLOBAL_ACC_R, LINE_ALLOC_FAIL), 1ull);
+        CHECK_EQ(cache.get_fail_stats(GLOBAL_ACC_R, LINE_PINNED_FAIL), 1ull);
     }
 
     {
@@ -1038,6 +1080,7 @@ TEST(write_miss_events_and_writeback)
     mem_fetch *w = new_mf(0x0000, 64, true, GLOBAL_ACC_W, 3,
                           sector_mask(0), byte_mask_range(0, 64));
     CHECK_EQ(wb.access(w->get_addr(), w, 3, events), HIT);
+    drain_one_level(wb, wb_mem, 4);
     events.clear();
     mem_fetch *r2 = new_mf(0x0040, 4, false, GLOBAL_ACC_R);
     CHECK_EQ(wb.access(r2->get_addr(), r2, 4, events), MISS);
@@ -1449,6 +1492,7 @@ static mixed_property_result run_mixed_seed(unsigned seed, unsigned iterations)
         expected_accesses++;
         if (resident[line]) {
             ok = ok && (status == HIT);
+            drain_one_level(cache, mem, i + 1);
         } else {
             ok = ok && !wr;
             ok = ok && (status == MISS);
@@ -1535,11 +1579,12 @@ TEST(port_timing_visibility)
     CHECK_TRUE(cache.fill_port_free());
 }
 
-TEST(hitlat_default_compatibility)
+TEST(hitlat_explicit_old_mode_compatibility)
 {
     simple_mem_interface mem(64);
     gpgpu_sim gpu;
     cache_config cfg = make_config("N:4:64:2,L:R:m:N:L,A:4:2,16");
+    cfg.set_defer_hit_response(false);
     read_only_cache cache("HitLatCompat", cfg, 0, 0, &mem, IN_L1C_MISS_QUEUE,
                           OTHER_GPU_CACHE, &gpu);
     fill_read_only_line(cache, mem, 0x1000, 1);
@@ -1548,6 +1593,7 @@ TEST(hitlat_default_compatibility)
     mem_fetch *hit = new_mf(0x1000, 4, false, GLOBAL_ACC_R, 3);
     CHECK_EQ(cache.access(hit->get_addr(), hit, 3, events), HIT);
     CHECK_FALSE(cache.access_ready());
+    final_check(cache, mem, 4);
 }
 
 TEST(hitlat_read_only_deferred_ready_latency)
@@ -1922,6 +1968,42 @@ TEST(hitlat_datastore_timing_token_only)
     CHECK_TRUE(cache.next_access() == hit);
 }
 
+TEST(final_check_baseline_cache_returns_to_initial_state)
+{
+    simple_mem_interface mem(64);
+    gpgpu_sim gpu;
+    cache_config cfg = make_config("N:4:64:2,L:R:m:N:L,A:4:2,16:1,8");
+    read_only_cache cache("FinalBaseline", cfg, 0, 0, &mem, IN_L1C_MISS_QUEUE,
+                          OTHER_GPU_CACHE, &gpu);
+
+    fill_read_only_line(cache, mem, 0x1000, 1);
+    CHECK_FALSE(cache.final_state_clean());
+
+    std::list<cache_event> events;
+    mem_fetch *hit = new_mf(0x1000, 4, false, GLOBAL_ACC_R, 4);
+    CHECK_EQ(cache.access(hit->get_addr(), hit, 4, events), HIT);
+    final_check(cache, mem, 5);
+}
+
+TEST(final_check_texture_cache_returns_to_initial_state)
+{
+    simple_mem_interface mem(64);
+    cache_config cfg = make_config("N:4:128:4,L:R:m:N:L,F:4:2,4:2");
+    tex_cache cache("FinalTexture", cfg, 0, 0, &mem, IN_L1C_MISS_QUEUE,
+                    IN_SHADER_FETCHED);
+
+    std::list<cache_event> events;
+    mem_fetch *miss = new_mf(0x2000, 16, false, TEXTURE_ACC_R, 1);
+    CHECK_EQ(cache.access(miss->get_addr(), miss, 1, events), MISS);
+    drain_texture(cache, mem, 2);
+    CHECK_FALSE(cache.final_state_clean());
+
+    events.clear();
+    mem_fetch *hit = new_mf(0x2000, 16, false, TEXTURE_ACC_R, 4);
+    CHECK_EQ(cache.access(hit->get_addr(), hit, 4, events), HIT_RESERVED);
+    final_check(cache, mem, 5);
+}
+
 int main()
 {
     printf("\n========== GPGPU-Sim Cache Deep Whitebox Test Suite ==========\n\n");
@@ -1952,7 +2034,7 @@ int main()
     RUN_TEST(multi_seed_differential_property_trace);
     RUN_TEST(mixed_read_write_differential_property_trace);
     RUN_TEST(port_timing_visibility);
-    RUN_TEST(hitlat_default_compatibility);
+    RUN_TEST(hitlat_explicit_old_mode_compatibility);
     RUN_TEST(hitlat_read_only_deferred_ready_latency);
     RUN_TEST(hitlat_data_read_and_write_deferred_ready);
     RUN_TEST(hitlat_same_cycle_hit_ready_precedes_miss_ready);
@@ -1964,6 +2046,8 @@ int main()
     RUN_TEST(hitlat_sector_line_level_pin);
     RUN_TEST(hitlat_write_evict_invalid_line_stays_pinned);
     RUN_TEST(hitlat_datastore_timing_token_only);
+    RUN_TEST(final_check_baseline_cache_returns_to_initial_state);
+    RUN_TEST(final_check_texture_cache_returns_to_initial_state);
 
     printf("\n========== Results: %d/%d tests passed ==========\n",
            tests_passed, tests_run);

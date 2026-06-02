@@ -25,7 +25,7 @@ miss 路径已经不同：`access()` 返回 `MISS` 只表示请求被接收并�
 | `data_cache` | read/write hit 从同步完成变成可选延迟完成 | 新模式下 read hit 必须延迟；write hit 行为需显式测试 |
 | `l1_cache`/`l2_cache` | 继承 `data_cache::access()` 语义 | 通过 data cache 测试覆盖 |
 | `tex_cache` | 已经采用 FIFO/ready 返回模型 | 本需求不修改，只保留回归保护 |
-| 调用方/场景测试 | 旧代码可能认为 `HIT` 立即完成 | 默认关闭新模式，并在实现阶段迁移测试 |
+| 调用方/场景测试 | 旧代码可能认为 `HIT` 立即完成 | 默认新模式交付；回归测试已迁移到 drain/ready 语义，旧模式仅显式开启 |
 
 ## 非目标
 
@@ -226,13 +226,13 @@ hit response 进入 `m_ready_response_queue` 后，`access_ready()` 返回 true�
 
 | 风险 | 说明 | 缓解 |
 |------|------|------|
-| 兼容性破坏 | 现有调用方可能认为 `HIT` 立即完成 | 默认关闭新模式，新增测试只在开启模式下验证 |
+| 兼容性破坏 | 现有调用方可能认为 `HIT` 立即完成 | 默认新模式交付，测试迁移到 `access_ready()/next_access()`；显式旧模式保留兼容检查 |
 | ready 顺序改变 | hit 和 miss 同周期 ready 的顺序会影响上层调度 | 方案文档和 testcase 固化顺序 |
 | 写 hit 语义不清 | 写 hit 是否需要返回 token需要明确 | 测试计划单独覆盖读 hit 和写 hit |
 | port 模型重复计数 | 现有 `use_data_port()` 已占用端口，新增队列不能重复计算 | 统一由 hit response 入队逻辑计算 latency，并保持 port 统计一致 |
 | texture 行为偏离 | texture 已经有独立 FIFO | 不改 texture，只做对齐测试 |
 | DataStore 可见性歧义 | hit 延迟期间若发生写入，payload 读取时机会影响结果 | 第一阶段只处理 timing token，不改变 payload |
-| 调用方漏改 | 开启新模式后只看 `HIT` 会提前完成 | 默认关闭；实现阶段增加迁移说明和 exactly-once 测试 |
+| 调用方漏改 | 新模式下只看 `HIT` 会提前完成 | 默认回归覆盖 migrated caller 语义、exactly-once 和 final check |
 | pending response line 被替换 | hit/miss response 未被读走前，valid line 可能被 replacement 选走 | line-level refcount/pin；replacement 跳过 pinned line |
 
 ## 分阶段实施建议
@@ -240,7 +240,7 @@ hit response 进入 `m_ready_response_queue` 后，`access_ready()` 返回 true�
 | 阶段 | 内容 | 交付 |
 |------|------|------|
 | 阶段 0 | 文档和评审 | 本文件、测试计划、requirements/feature/testcase planned 追踪 |
-| 阶段 1 | 增加兼容开关和 hit response queue | 默认旧行为不变，新模式测试通过 |
+| 阶段 1 | 增加兼容开关和 hit response queue | 默认新模式通过，旧模式显式兼容测试通过 |
 | 阶段 2 | 增加 line-level refcount/pin，replacement 跳过 pinned line | pinned line victim 保护测试通过 |
 | 阶段 3 | 扩展 read-only/data read hit 延迟返回 | 新增 read hit latency tests |
 | 阶段 4 | 扩展 write hit 延迟返回 | 新增 write hit latency tests |
@@ -253,13 +253,15 @@ hit response 进入 `m_ready_response_queue` 后，`access_ready()` 返回 true�
 |------|----------|------------|
 | 项目经理 | 通过，前提是先以兼容开关落地，避免影响现有用户 | requirements 必须标明“方案完成、实现待开展” |
 | 设计 | 通过，推荐复用 `access_ready()/next_access()`，不新增分裂接口 | 固化 `HIT` 表示 tag hit/accepted，不表示数据返回 |
-| 验证 | 通过，要求新增开关默认关闭和开启模式两类测试 | 测试必须断言 hit 后不能同周期 ready、若干 cycle 后 ready |
+| 验证 | 通过，要求默认新模式和显式旧模式两类测试 | 测试必须断言 hit 后不能同周期 ready、若干 cycle 后 ready |
 | 测试专家 | 通过，要求覆盖 read-only/data/read hit/write hit/hit-miss 同周期顺序 | testcase 先标记 Planned，实现阶段不得标记 Implemented |
 | 独立评审代理 | 通过，要求补充 backpressure、统计口径、DataStore 读取时机、exactly-once property 和行为破坏性说明 | 已补入本策略和测试计划 |
 
 ## 实现状态
 
 2026-06-02 第一阶段实现已完成：新增兼容开关、bounded hit response queue、line refcount/pin、`access_ready()/next_access()` hit 延迟返回路径，以及 `LINE_PINNED_FAIL`/`HIT_RESPONSE_QUEUE_FULL` fail reason。`TC-HITLAT-001..020` 已反标到 `test/test_cache_whitebox.cc` 的 `hitlat_*` 用例；默认 `./run.sh` 全通过。
+
+2026-06-02 交付默认模式已切换为新模式，旧模式仅通过 `set_defer_hit_response(false)` 显式保留。新增 final check 可观测接口和 `TC-FINAL-001/002`，覆盖 baseline/read-only/data cache 与 texture cache 的用例收尾状态：内部 queue/FIFO/MSHR/pending ref 清空，line/data block 回到初始态。
 
 ## 评审限制说明
 

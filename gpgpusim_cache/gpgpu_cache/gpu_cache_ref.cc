@@ -481,6 +481,17 @@ void tag_array::invalidate() {
   is_used = false;
 }
 
+bool tag_array::final_state_clean() const {
+  if (!pending_lines.empty()) return false;
+
+  for (unsigned i = 0; i < m_config.get_num_lines(); i++) {
+    if (!m_lines[i]->is_invalid_line()) return false;
+    if (m_lines[i]->is_pinned()) return false;
+  }
+
+  return true;
+}
+
 float tag_array::windowed_miss_rate() const {
   unsigned n_access = m_access - m_prev_snapshot_access;
   unsigned n_miss = (m_miss + m_sector_miss) - m_prev_snapshot_miss;
@@ -1277,6 +1288,16 @@ mem_fetch *baseline_cache::next_access() {
   mem_fetch *mf = m_mshrs.next_access();
   unpin_response(mf);
   return mf;
+}
+
+bool baseline_cache::queues_empty() const {
+  return m_miss_queue.empty() && m_extra_mf_fields.empty() &&
+         m_hit_response_queue.empty() && m_ready_response_queue.empty() &&
+         m_pending_response_indices.empty() && m_mshrs.empty();
+}
+
+bool baseline_cache::final_state_clean() const {
+  return queues_empty() && m_tag_array->final_state_clean();
 }
 
 /// Sends next request to lower level of memory
@@ -2207,6 +2228,30 @@ void tex_cache::fill(mem_fetch *mf, unsigned time) {
   r.m_ready = true;
   r.m_time = time;
   assert(r.m_block_addr == m_config.block_addr(mf->get_addr()));
+  m_extra_mf_fields.erase(e);
+}
+
+void tex_cache::invalidate() {
+  m_tags.invalidate();
+  for (unsigned i = 0; i < m_config.get_num_lines(); i++) {
+    m_cache[i].m_valid = false;
+    m_cache[i].m_block_addr = 0;
+  }
+}
+
+bool tex_cache::queues_empty() const {
+  return m_fragment_fifo.empty() && m_request_fifo.empty() && m_rob.empty() &&
+         m_result_fifo.empty() && m_extra_mf_fields.empty();
+}
+
+bool tex_cache::final_state_clean() const {
+  if (!queues_empty()) return false;
+  if (!m_tags.final_state_clean()) return false;
+
+  for (unsigned i = 0; i < m_config.get_num_lines(); i++)
+    if (m_cache[i].m_valid) return false;
+
+  return true;
 }
 
 void tex_cache::display_state(FILE *fp) const {

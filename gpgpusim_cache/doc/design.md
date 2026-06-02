@@ -273,6 +273,31 @@ cycle N+k: token 通过 next_access() 返回
 
 所有新增 testcase 必须按配置、输入、流程、输出四个维度记录到 `doc/verification/testcase_matrix.md`。
 
+### 默认交付模式
+
+当前交付模式为默认新模式：`cache_config` 构造时 `m_defer_hit_response=true`。用户如果需要历史同步 hit 行为，必须显式调用：
+
+```cpp
+cfg.set_defer_hit_response(false);
+```
+
+因此默认调用方不能把 `access()` 返回 `HIT` 理解为数据已经完成返回。`HIT` 只表示 tag hit 且请求已被 cache 接收；完成点必须通过 `access_ready()` 和 `next_access()` 观察。
+
+### Final Check 设计
+
+为支持用例收尾质量检查，当前实现提供只读式状态观测接口：
+
+| 对象 | 接口 | 检查范围 |
+|------|------|----------|
+| `tag_array` | `final_state_clean()` | pending line 表为空，所有 line invalid 且 unpinned |
+| `mshr_table` | `empty()` | MSHR entry 表和 ready response 队列为空 |
+| `baseline_cache` | `queues_empty()` / `final_state_clean()` | miss queue、MSHR、extra fields、hit response queue、ready response queue、pending response index、tag line |
+| `tex_cache` | `queues_empty()` / `final_state_clean()` | fragment FIFO、request FIFO、ROB、result FIFO、extra fields、tag line、texture data block |
+
+final check 不提供强制清空内部状态的后门。测试必须先通过正常 `cycle()`、`fill()`、`next_access()` drain 到空，再调用 `invalidate()` 将 line/data block 回到初始态，最后断言 `final_state_clean()==true`。
+
+故障注入类用例如果刻意制造下游背压或未完成请求，不应直接套用 final check；它们必须在可收敛路径补 drain，或在 testcase 中说明该场景故意保持 pending。
+
 ### 设计状态
 
-本文档为需求方案阶段设计，尚未进入代码实现。
+已进入代码实现并通过默认回归。2026-06-02 当前结果：`./run.sh` 通过 unit `13/13`、scenario `86/86 checks`、whitebox `40/40`、death `16/16`；`./coverage.sh coverage-final-check` 总覆盖率 Region `56.43%`、Function `73.52%`、Line `70.25%`、Branch `60.21%`。

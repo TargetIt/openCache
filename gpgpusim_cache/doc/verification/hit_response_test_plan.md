@@ -6,20 +6,21 @@
 
 ## 测试原则
 
-1. 旧模式兼容性必须测试：默认配置下历史行为保持不变。
-2. 新模式语义必须测试：hit 不能在 `access()` 同周期通过 `next_access()` 返回。
+1. 新模式是交付默认模式：默认配置下 hit 不能在 `access()` 同周期通过 `next_access()` 返回。
+2. 旧模式兼容性必须测试：仅在显式 `set_defer_hit_response(false)` 后历史同步 hit 行为保持不变。
 3. 延迟必须与 `data_port_width` 和 `data_size` 相关。
 4. hit ready 与 miss ready 的同周期顺序必须测试并固化。
 5. read-only、data read hit、data write hit 都必须覆盖。
 6. texture cache 不改行为，但要保留对齐测试，证明现有 texture 模型仍通过。
 7. 每个 accepted request 必须 exactly-once 返回：不能丢、不能重复、不能提前。
 8. pending response 对应 cache line 必须被 pin，`next_access()` 前不能被 replacement 选为 victim。
+9. 用例收尾必须能通过 final check：内部 queue/FIFO/MSHR/pending ref 清空，line 或 texture data block 回到初始状态。
 
 ## Implemented Feature
 
 | Feature ID | Feature | 验证重点 |
 |------------|---------|----------|
-| F-HITLAT-001 | hit response 配置开关 | 默认旧行为；开启后 hit 延迟返回 |
+| F-HITLAT-001 | hit response 配置开关 | 默认新模式；显式关闭后保留旧 hit 兼容行为 |
 | F-HITLAT-002 | read-only hit 延迟返回 | read-only hit 进入 ready queue，按 data port latency 返回 |
 | F-HITLAT-003 | data read hit 延迟返回 | data/l1/l2 read hit 进入 ready queue，`HIT` 不等于数据立即完成 |
 | F-HITLAT-004 | data write hit 延迟返回 | WB/WT/WE/local-global 写 hit 的完成点和 ready 行为 |
@@ -34,12 +35,14 @@
 | F-HITLAT-013 | write-evict pinned invalid | write-evict hit 立即 invalid 但仍 pinned 时不能作为 victim |
 | F-HITLAT-014 | bounded hit response queue | hit response queue 有限容量和背压 |
 | F-HITLAT-015 | DataStore snapshot timing | hit accepted 时快照语义与延迟 token 返回不混淆 |
+| F-FINAL-001 | baseline cache final check | baseline/read-only/data cache 收尾状态可观测并可回到初始态 |
+| F-FINAL-002 | texture cache final check | texture FIFO/ROB/extra fields/tag/data block 收尾状态可观测并可回到初始态 |
 
 ## Implemented Testcase
 
 | Testcase ID | Feature | 类型 | 状态 | 期望 |
 |-------------|---------|------|------|------|
-| TC-HITLAT-001 | F-HITLAT-001 | unit | Implemented | 默认不开启 hit 延迟时，既有 hit 行为和当前回归保持一致 |
+| TC-HITLAT-001 | F-HITLAT-001 | unit | Implemented | 默认新模式开启；显式 `set_defer_hit_response(false)` 时旧 hit 行为保持兼容 |
 | TC-HITLAT-002 | F-HITLAT-002 | unit | Implemented | read-only cache hit 返回 `HIT`，同周期 `access_ready()==false`，延迟后 `next_access()` 返回原 mf |
 | TC-HITLAT-003 | F-HITLAT-003 | unit | Implemented | l1/data read hit 返回 `HIT`，按 `ceil(data_size/data_port_width)` cycle 后 ready |
 | TC-HITLAT-004 | F-HITLAT-004 | unit | Implemented | write-back hit 延迟返回，并保持 dirty/tag 更新正确 |
@@ -59,6 +62,8 @@
 | TC-HITLAT-018 | F-HITLAT-013 | unit | Implemented | write-evict hit 立即 invalid 但仍 pinned 时，同 set miss 不能复用该 invalid line |
 | TC-HITLAT-019 | F-HITLAT-014 | unit | Implemented | hit response queue 达容量上限后返回 `RESERVATION_FAIL`，drain 后恢复接收 |
 | TC-HITLAT-020 | F-HITLAT-015 | unit | Implemented | DataStore hit accepted 时快照语义被文档和场景测试固定，不误当成 coherence 行为 |
+| TC-FINAL-001 | F-FINAL-001 | unit | Implemented | baseline cache 收尾 drain 后，invalidate 使 queue/MSHR/pending ref 和所有 line 回初始状态 |
+| TC-FINAL-002 | F-FINAL-002 | unit | Implemented | texture cache 收尾 drain 后，invalidate 使 FIFO/ROB/extra fields/tag/data block 回初始状态 |
 
 ## 关键测试场景
 
@@ -119,6 +124,13 @@
 
 第一阶段实现使用有限 hit response queue，`TC-HITLAT-011` 和 `TC-HITLAT-019` 已覆盖 queue full fail reason 以及 drain 后恢复接收。
 
+### Final Check
+
+1. baseline/read-only/data cache 提供 `queues_empty()` 和 `final_state_clean()`，覆盖 miss queue、MSHR、hit response queue、ready response queue、pending response index、extra fields、tag pending lines 和 line pin 状态。
+2. texture cache 提供 `queues_empty()` 和 `final_state_clean()`，覆盖 fragment FIFO、request FIFO、ROB、result FIFO、extra fields、tag line 和 texture data block。
+3. 用例收尾 helper 先 drain 到内部队列空，再调用 `invalidate()`，最后断言 `final_state_clean()==true` 且外部 memory queue 为空。
+4. 故障注入类用例如果刻意制造下游背压，不直接套用 final check；必须在可收敛路径补 drain 或另行说明。
+
 ### Refcount / pin
 
 1. hit 被接收并进入 hit response queue 后，对应 line refcount 加一。
@@ -139,7 +151,9 @@
 
 ## 实现结果
 
-2026-06-02 已完成第一阶段实现，`TC-HITLAT-001..020` 均反标到 `test/test_cache_whitebox.cc` 的 `hitlat_*` 用例。默认 `./run.sh` 通过：unit `13/13`、scenario `86/86 checks`、whitebox `38/38`、death `16/16`。覆盖率通过 `./coverage.sh coverage-hitlat` 刷新：Total Region `55.49%`、Function `72.86%`、Line `69.82%`、Branch `60.30%`。
+2026-06-02 已完成第一阶段实现，`TC-HITLAT-001..020` 均反标到 `test/test_cache_whitebox.cc` 的 `hitlat_*` 用例。
+
+2026-06-02 交付模式调整为默认新模式，旧模式仅作为显式兼容开关保留；所有默认回归用例按新模式运行。新增 `TC-FINAL-001/002` final check 用例后，`./run.sh` 通过：unit `13/13`、scenario `86/86 checks`、whitebox `40/40`、death `16/16`。覆盖率通过 `./coverage.sh coverage-final-check` 刷新：Total Region `56.43%`、Function `73.52%`、Line `70.25%`、Branch `60.21%`。
 
 交付时同步更新：
 
@@ -155,7 +169,7 @@
 |------|------|------|
 | 项目经理 | 通过 | 文档阶段只标记 Planned；实现完成后必须刷新为 Implemented |
 | 设计 | 通过 | 测试必须约束接口语义，尤其是 `HIT` 与数据 ready 的区别 |
-| 验证 | 通过 | 必须覆盖默认旧模式和新模式，防止兼容性回退 |
+| 验证 | 通过 | 必须覆盖默认新模式和显式旧模式，防止交付语义或兼容开关回退 |
 | 测试专家 | 通过 | 必须有精确 cycle 级断言、ready 顺序断言和统计一致性断言 |
 | 独立评审代理 | 通过 | 补充 backpressure、统计口径、DataStore 读取时机、exactly-once property 和破坏性变更风险 |
 
