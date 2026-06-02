@@ -14,6 +14,7 @@
 | F-CFG-008 | MSHR type | 白盒 | ASSOC、SECTOR_ASSOC、TEX_FIFO、SECTOR_TEX_FIFO | TC-MSHR-001, TC-MSHR-006, TC-TEX-001, TC-TEX-004 |
 | F-CFG-009 | set index function | 白盒 | LINEAR、XOR、IPOLY、FERMI、CUSTOM 范围、基本差异、边界/高位地址 golden 值 | TC-ADDR-001 |
 | F-CFG-010 | illegal config/assert path | 异常 | parse error、sector line size、writeback/on-fill、lazy/on-fill、port width、Fermi nset | TC-DEATH-001 |
+| F-CFG-011 | parameter matrix | 接口/白盒/组合 | 单参数典型值遍历和约束 pairwise 组合，覆盖 nset、assoc/way、line size、cache type、replacement、write policy、allocation、write allocate、MSHR/FIFO、data port、set-index | TC-CFG-011, TC-CFG-012 |
 | F-ADDR-001 | block/tag/mshr 地址对齐 | 接口 | line、sector atom、tag 等式 | TC-ADDR-002 |
 | F-ADDR-002 | 边界地址 | 接口 | 0、line 末尾、跨 line、较大地址 | TC-ADDR-003 |
 | F-BLK-001 | line block 生命周期 | 白盒 | INVALID->RESERVED->VALID->MODIFIED->INVALID | TC-TAG-001, TC-TAG-002 |

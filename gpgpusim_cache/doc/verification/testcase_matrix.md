@@ -8,7 +8,9 @@
 | TC-CFG-002 | F-CFG-002 | unit | Implemented | `test/test_main.cc` | `none` 配置禁用 |
 | TC-CFG-003 | F-CFG-003 | unit | Implemented | `test/test_cache_whitebox.cc` | NORMAL/SECTOR atom size 正确 |
 | TC-CFG-004 | F-CFG-005 | unit | Implemented | `test/test_cache_whitebox.cc` | STREAMING 转 ON_FILL 且 `is_streaming()` |
-| TC-DEATH-001 | F-CFG-010 | death | Implemented | `test/test_death.cc` | 非法配置/assert 路径在子进程中异常退出，主回归不中断 |
+| TC-CFG-011 | F-CFG-011 | unit | Implemented | `test/test_cache_whitebox.cc` | 单参数典型值矩阵解析和派生字段校验 |
+| TC-CFG-012 | F-CFG-011 | unit | Implemented | `test/test_cache_whitebox.cc` | 约束 pairwise 参数组合执行 miss/fill/hit 或 texture ready smoke |
+| TC-DEATH-001 | F-CFG-010 | death | Implemented | `test/test_death.cc` | 非法配置/assert 路径在子进程中异常退出，主回归不中断；覆盖策略非法组合、texture token 缺失、非法枚举字符、port width、Fermi nset |
 | TC-ADDR-001 | F-CFG-009 | unit | Implemented | `test/test_cache_whitebox.cc` | LINEAR/XOR/IPOLY/CUSTOM/FERMI32/FERMI64 set-index 在范围内，并校验 9 个边界/高位地址 golden 值 |
 | TC-ADDR-002 | F-ADDR-001 | unit | Implemented | `test/test_cache_whitebox.cc` | block/tag/mshr 地址按 line/sector 对齐 |
 | TC-ADDR-003 | F-ADDR-002 | unit | Implemented | `test/test_cache_whitebox.cc` | 边界地址映射不越界 |
@@ -55,7 +57,7 @@
 | TC-PROP-002 | F-PROP-001 | property | Implemented | `test/test_cache_whitebox.cc` | 5-seed read-only 随机 trace 重复运行差分一致，校验 accesses/misses/res_fails 不变量 |
 | TC-PROP-003 | F-PROP-001 | property | Implemented | `test/test_cache_whitebox.cc` | 4-seed read/write 混合 trace 与无驱逐 oracle 对照，校验 hit/miss、per-window read/write hit 和重复运行一致性 |
 | TC-REG-001 | F-REG-001 | regression | Implemented | `run.sh` | 一键回归 unit/scenario/whitebox/death 全部通过 |
-| TC-COV-001 | F-COV-001 | coverage | Implemented | `coverage.sh` | 生成覆盖率报告；当前 line 68.59%、function 71.15%、branch 58.60%；death 子进程 abort 路径不计入 coverage；llvm-cov mismatch 诊断落盘并写入说明 |
+| TC-COV-001 | F-COV-001 | coverage | Implemented | `coverage.sh` | 生成覆盖率报告；当前 line 68.77%、function 71.65%、branch 58.90%；death 子进程 abort 路径不计入 coverage；llvm-cov mismatch 诊断落盘并写入说明 |
 
 ## 多角色检视记录
 
@@ -64,4 +66,4 @@
 | step0 验证方案 | 通过，要求覆盖写策略和 sector/texture | 通过，要求区分用户场景与白盒 | 通过，要求先修测试框架假通过 | 通过，要求 requirements 追踪 |
 | step1 feature | 通过，feature 覆盖主要接口和状态机 | 通过，建议后续补 death tests | 通过，要求每条反标 testcase | 通过，要求 planned 不得冒充 implemented |
 | step2 testcase | 通过，覆盖架构风险点 | 通过，测试分层明确 | 通过，要求默认回归全部可执行 | 通过，要求 run.sh 和 coverage.sh 纳入交付 |
-| step3-step7 | 通过，新增白盒和 death 覆盖关键架构风险；覆盖率需后续继续提升 | 通过，run.sh/CMake/coverage.sh 均纳入 | 通过，默认回归 13+10+19+6 全通过 | 通过，文档和追踪矩阵已刷新 |
+| step3-step7 | 通过，新增白盒和 death 覆盖关键架构风险；参数矩阵已纳入；覆盖率需后续继续提升 | 通过，run.sh/CMake/coverage.sh 均纳入 | 通过，默认回归 13+10+21+16 全通过 | 通过，文档和追踪矩阵已刷新 |

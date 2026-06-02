@@ -81,15 +81,65 @@ static void death_lazy_fetch_on_fill()
     (void)make_config("N:4:64:2,L:T:f:L:L,A:4:2,8");
 }
 
+static void death_fetch_on_write_on_fill()
+{
+    (void)make_config("N:4:64:2,L:T:f:F:L,A:4:2,8");
+}
+
+static void death_streaming_writeback()
+{
+    (void)make_config("N:4:64:2,L:B:s:N:L,A:4:2,8");
+}
+
 static void death_bad_data_port_width()
 {
     (void)make_config("N:4:64:2,L:R:m:N:L,A:4:2,8:1,24");
+}
+
+static void death_missing_texture_result_fifo()
+{
+    (void)make_config("N:4:128:4,L:R:m:N:L,F:4:2,4");
 }
 
 static void death_invalid_fermi_set_count()
 {
     cache_config cfg = make_config("N:16:64:2,L:R:m:N:H,A:4:2,8");
     (void)cfg.set_index(0x1000);
+}
+
+static void death_invalid_cache_type_char()
+{
+    (void)make_config("Q:4:64:2,L:R:m:N:L,A:4:2,8");
+}
+
+static void death_invalid_replacement_char()
+{
+    (void)make_config("N:4:64:2,Q:R:m:N:L,A:4:2,8");
+}
+
+static void death_invalid_write_policy_char()
+{
+    (void)make_config("N:4:64:2,L:Q:m:N:L,A:4:2,8");
+}
+
+static void death_invalid_alloc_policy_char()
+{
+    (void)make_config("N:4:64:2,L:R:q:N:L,A:4:2,8");
+}
+
+static void death_invalid_write_alloc_char()
+{
+    (void)make_config("N:4:64:2,L:R:m:Q:L,A:4:2,8");
+}
+
+static void death_invalid_set_index_char()
+{
+    (void)make_config("N:4:64:2,L:R:m:N:Q,A:4:2,8");
+}
+
+static void death_invalid_mshr_type_char()
+{
+    (void)make_config("N:4:64:2,L:R:m:N:L,Q:4:2,8");
 }
 
 int main()
@@ -100,8 +150,18 @@ int main()
     RUN_DEATH(invalid_sector_line_size);
     RUN_DEATH(writeback_on_fill);
     RUN_DEATH(lazy_fetch_on_fill);
+    RUN_DEATH(fetch_on_write_on_fill);
+    RUN_DEATH(streaming_writeback);
     RUN_DEATH(bad_data_port_width);
+    RUN_DEATH(missing_texture_result_fifo);
     RUN_DEATH(invalid_fermi_set_count);
+    RUN_DEATH(invalid_cache_type_char);
+    RUN_DEATH(invalid_replacement_char);
+    RUN_DEATH(invalid_write_policy_char);
+    RUN_DEATH(invalid_alloc_policy_char);
+    RUN_DEATH(invalid_write_alloc_char);
+    RUN_DEATH(invalid_set_index_char);
+    RUN_DEATH(invalid_mshr_type_char);
 
     printf("\n========== Results: %d/%d tests passed ==========\n",
            tests_passed, tests_run);

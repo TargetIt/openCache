@@ -29,6 +29,32 @@
 
 2026-06-01
 
+## REQ-20260602-001 gpgpusim_cache 参数矩阵验证
+
+### 原始来源
+
+用户要求调查并补齐 `gpgpusim_cache` 中 set 数、way/assoc、line size、data port 宽度、MSHR 参数、cache type、写策略等可配参数的典型状态遍历，以及参数相互组合遍历。
+
+### 拆解需求
+
+| 子需求 | 内容 | 状态 |
+|--------|------|------|
+| GPGPUSIM-PARAM-001 | 在 feature/testcase 文档中新增参数矩阵验证项，并反标到具体测试 | 已完成 |
+| GPGPUSIM-PARAM-002 | 覆盖单参数典型值：nset、assoc、line size、cache type、replacement、write policy、allocation、write allocate、MSHR type、MSHR entries/merge、miss queue、texture FIFO、data port width、set-index function | 已完成 |
+| GPGPUSIM-PARAM-003 | 覆盖约束后的 pairwise 组合：NORMAL/SECTOR x MSHR type、write policy x write allocate、line size x data port、nset x assoc、replacement x line pressure、texture FIFO 组合 | 已完成 |
+| GPGPUSIM-PARAM-004 | 保留非法组合 death tests，并把参数矩阵新增结果同步到遗留问题和覆盖率基线 | 已完成 |
+
+### 验收标准
+
+1. Feature/testcase 文档中有参数矩阵验证条目。
+2. 默认 `./run.sh` 执行参数矩阵用例并通过。
+3. `./coverage.sh` 通过，覆盖率基线与遗留问题文档同步刷新。
+4. 参数矩阵不能只 parse 配置，至少对代表性组合执行一次 miss/fill/hit 或 texture ready 流程。
+
+### 更新时间
+
+2026-06-02
+
 ## 新需求追加区
 
 后续 GPGPU-Sim 版本需求从这里继续追加。
@@ -54,7 +80,7 @@
 
 ### 验收标准
 
-1. `./run.sh` 通过：unit 13/13，scenario 86/86 checks，whitebox 19/19，death 6/6。
+1. `./run.sh` 通过：unit 13/13，scenario 86/86 checks，whitebox 21/21，death 16/16。
 2. `./coverage.sh` 通过并输出覆盖率摘要。
 3. Feature/testcase 文档中每条已实现 testcase 映射到测试文件。
 4. 覆盖率基线已记录，低覆盖区域作为后续迭代输入。
@@ -70,10 +96,10 @@
 
 | 指标 | 覆盖率 |
 |------|--------|
-| Region | 54.10% |
-| Function | 71.15% |
-| Line | 68.59% |
-| Branch | 58.60% |
+| Region | 54.31% |
+| Function | 71.65% |
+| Line | 68.77% |
+| Branch | 58.90% |
 
 ### 更新时间
 

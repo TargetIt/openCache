@@ -87,6 +87,28 @@ struct set_index_golden {
     unsigned fermi64;
 };
 
+struct config_axis_case {
+    const char *label;
+    const char *text;
+    unsigned nset;
+    unsigned line_sz;
+    unsigned assoc;
+    unsigned atom_sz;
+    unsigned data_port_width;
+    enum mshr_config_t mshr_type;
+    enum write_policy_t write_policy;
+    enum write_allocate_policy_t write_alloc_policy;
+    bool streaming;
+};
+
+struct pairwise_smoke_case {
+    const char *label;
+    const char *text;
+    bool texture;
+    bool sector_texture;
+    bool sector_assoc;
+};
+
 static mem_fetch *new_mf(new_addr_type addr, unsigned size, bool wr,
                          mem_access_type type, unsigned cycle = 0,
                          mem_access_sector_mask_t sm = sector_mask(0),
@@ -200,6 +222,188 @@ TEST(status_string_tables)
     CHECK_EQ(strcmp(cache_fail_status_str(MSHR_RW_PENDING),
                     "MSHR_RW_PENDING"),
              0);
+}
+
+TEST(parameter_single_axis_matrix)
+{
+    const config_axis_case cases[] = {
+        {"nset_min", "N:1:64:1,L:R:m:N:L,A:1:1,64",
+         1u, 64u, 1u, 64u, 64u, ASSOC, READ_ONLY, NO_WRITE_ALLOCATE, false},
+        {"nset_mid_assoc2", "N:16:64:2,L:R:m:N:L,A:4:2,16",
+         16u, 64u, 2u, 64u, 64u, ASSOC, READ_ONLY, NO_WRITE_ALLOCATE, false},
+        {"nset_large_assoc16", "N:256:128:16,L:B:m:F:L,A:64:8,128",
+         256u, 128u, 16u, 128u, 128u, ASSOC, WRITE_BACK, FETCH_ON_WRITE, false},
+        {"sector_atom", "S:4:128:4,L:B:m:F:L,A:4:2,8",
+         4u, 128u, 4u, (unsigned)SECTOR_SIZE, 128u, ASSOC, WRITE_BACK,
+         FETCH_ON_WRITE, false},
+        {"fifo_replacement", "N:4:64:2,F:R:m:N:L,A:4:2,8",
+         4u, 64u, 2u, 64u, 64u, ASSOC, READ_ONLY, NO_WRITE_ALLOCATE, false},
+        {"write_through", "N:4:64:2,L:T:m:N:L,A:8:4,16",
+         4u, 64u, 2u, 64u, 64u, ASSOC, WRITE_THROUGH, NO_WRITE_ALLOCATE, false},
+        {"write_evict", "N:4:64:2,L:E:m:N:L,A:8:4,16",
+         4u, 64u, 2u, 64u, 64u, ASSOC, WRITE_EVICT, NO_WRITE_ALLOCATE, false},
+        {"local_wb_global_wt", "N:4:64:2,L:L:m:N:L,A:8:4,16",
+         4u, 64u, 2u, 64u, 64u, ASSOC, LOCAL_WB_GLOBAL_WT,
+         NO_WRITE_ALLOCATE, false},
+        {"write_allocate", "N:4:64:2,L:B:m:W:L,A:8:4,16",
+         4u, 64u, 2u, 64u, 64u, ASSOC, WRITE_BACK, WRITE_ALLOCATE, false},
+        {"lazy_fetch", "S:2:128:1,L:B:m:L:L,A:8:4,16",
+         2u, 128u, 1u, (unsigned)SECTOR_SIZE, 128u, ASSOC, WRITE_BACK,
+         LAZY_FETCH_ON_READ, false},
+        {"streaming", "N:8:64:2,L:R:s:N:L,A:8:2,16",
+         8u, 64u, 2u, 64u, 64u, ASSOC, READ_ONLY, NO_WRITE_ALLOCATE, true},
+        {"sector_assoc", "S:4:128:4,L:B:m:N:L,S:4:2,8",
+         4u, 128u, 4u, (unsigned)SECTOR_SIZE, 128u, SECTOR_ASSOC,
+         WRITE_BACK, NO_WRITE_ALLOCATE, false},
+        {"tex_fifo", "N:4:128:4,L:R:m:N:L,F:4:2,4:2",
+         4u, 128u, 4u, 128u, 128u, TEX_FIFO, READ_ONLY, NO_WRITE_ALLOCATE,
+         false},
+        {"sector_tex_fifo", "S:4:128:4,L:R:m:N:L,T:4:2,4:2",
+         4u, 128u, 4u, (unsigned)SECTOR_SIZE, 128u, SECTOR_TEX_FIFO,
+         READ_ONLY, NO_WRITE_ALLOCATE, false},
+        {"explicit_data_port", "N:4:64:2,L:B:m:F:L,A:4:2,16:1,8",
+         4u, 64u, 2u, 64u, 8u, ASSOC, WRITE_BACK, FETCH_ON_WRITE, false},
+        {"xor_index", "N:16:64:2,L:R:m:N:X,A:8:2,16",
+         16u, 64u, 2u, 64u, 64u, ASSOC, READ_ONLY, NO_WRITE_ALLOCATE, false},
+        {"ipoly_index", "N:16:64:2,L:R:m:N:P,A:8:2,16",
+         16u, 64u, 2u, 64u, 64u, ASSOC, READ_ONLY, NO_WRITE_ALLOCATE, false},
+        {"fermi_index", "N:32:64:2,L:R:m:N:H,A:8:2,16",
+         32u, 64u, 2u, 64u, 64u, ASSOC, READ_ONLY, NO_WRITE_ALLOCATE, false},
+    };
+
+    for (const config_axis_case &entry : cases) {
+        cache_config cfg = make_config(entry.text);
+        CHECK_EQ(cfg.get_nset(), entry.nset);
+        CHECK_EQ(cfg.get_line_sz(), entry.line_sz);
+        CHECK_EQ(cfg.get_num_lines(), entry.nset * entry.assoc);
+        CHECK_EQ(cfg.get_atom_sz(), entry.atom_sz);
+        CHECK_EQ(cfg.get_data_port_width(), entry.data_port_width);
+        CHECK_EQ((unsigned)cfg.get_mshr_type(), (unsigned)entry.mshr_type);
+        CHECK_EQ((unsigned)cfg.get_write_policy(), (unsigned)entry.write_policy);
+        CHECK_EQ((unsigned)cfg.get_write_allocate_policy(),
+                 (unsigned)entry.write_alloc_policy);
+        CHECK_EQ(cfg.is_streaming(), entry.streaming);
+        CHECK_TRUE(cfg.set_index(0x12340) < cfg.get_nset());
+        CHECK_EQ(cfg.get_total_size_inKB(),
+                 entry.nset * entry.assoc * entry.line_sz / 1024);
+    }
+}
+
+static void run_data_smoke(const char *text, bool sector_assoc)
+{
+    simple_mem_interface mem(64);
+    simple_mf_allocator allocator;
+    gpgpu_sim gpu;
+    cache_config cfg = make_config(text);
+    if (cfg.get_write_policy() == READ_ONLY) {
+        read_only_cache cache("ParamReadOnly", cfg, 0, 0, &mem,
+                              IN_L1C_MISS_QUEUE, OTHER_GPU_CACHE, &gpu);
+        std::list<cache_event> events;
+        mem_fetch *read = new_mf(0x1000, 4, false, GLOBAL_ACC_R, 1);
+        CHECK_EQ(cache.access(read->get_addr(), read, 1, events), MISS);
+        CHECK_TRUE(has_event(events, READ_REQUEST_SENT));
+        drain_one_level(cache, mem, 2);
+        events.clear();
+        mem_fetch *hit = new_mf(0x1000, 4, false, GLOBAL_ACC_R, 3);
+        CHECK_EQ(cache.access(hit->get_addr(), hit, 3, events), HIT);
+        return;
+    }
+
+    l1_cache cache("ParamData", cfg, 0, 0, &mem, &allocator,
+                   IN_L1D_MISS_QUEUE, &gpu, L1_GPU_CACHE);
+    std::list<cache_event> events;
+    mem_fetch *read = new_mf(0x1000, 4, false, GLOBAL_ACC_R, 1);
+    CHECK_EQ(cache.access(read->get_addr(), read, 1, events), MISS);
+    CHECK_TRUE(has_event(events, READ_REQUEST_SENT));
+    cache.cycle();
+    CHECK_EQ(mem.queue.size(), 1u);
+    mem_fetch *req = mem.queue.front();
+    mem.queue.pop_front();
+    if (sector_assoc) {
+        for (unsigned sector = 0; sector < 3; ++sector) {
+            mem_fetch *partial = new_child_mf(0x1000 + sector * SECTOR_SIZE,
+                                              SECTOR_SIZE, false, GLOBAL_ACC_R,
+                                              req, 2 + sector,
+                                              sector_mask(sector),
+                                              byte_mask_range(sector * SECTOR_SIZE,
+                                                              SECTOR_SIZE));
+            cache.fill(partial, 2 + sector);
+            CHECK_FALSE(cache.access_ready());
+        }
+        mem_fetch *final_resp = new_child_mf(0x1000 + 3 * SECTOR_SIZE,
+                                             SECTOR_SIZE, false, GLOBAL_ACC_R,
+                                             req, 5, sector_mask(3),
+                                             byte_mask_range(3 * SECTOR_SIZE,
+                                                             SECTOR_SIZE));
+        cache.fill(final_resp, 5);
+    } else {
+        cache.fill(req, 2);
+    }
+    CHECK_TRUE(cache.access_ready());
+    CHECK_TRUE(cache.next_access() == read);
+
+    events.clear();
+    mem_fetch *hit = new_mf(0x1000, 4, false, GLOBAL_ACC_R, 6);
+    CHECK_EQ(cache.access(hit->get_addr(), hit, 6, events), HIT);
+}
+
+static void run_texture_smoke(const char *text, bool sector_texture)
+{
+    simple_mem_interface mem(64);
+    cache_config cfg = make_config(text);
+    tex_cache cache("ParamTex", cfg, 0, 0, &mem, IN_L1T_MISS_QUEUE,
+                    IN_SHADER_L1T_ROB);
+    std::list<cache_event> events;
+    mem_fetch *read = new_mf(0x2000, 4, false, TEXTURE_ACC_R, 1);
+    CHECK_EQ(cache.access(read->get_addr(), read, 1, events), MISS);
+    CHECK_TRUE(has_event(events, READ_REQUEST_SENT));
+    cache.cycle();
+    CHECK_EQ(mem.queue.size(), 1u);
+    mem_fetch *req = mem.queue.front();
+    mem.queue.pop_front();
+    if (sector_texture) {
+        for (unsigned sector = 0; sector < 3; ++sector) {
+            mem_fetch *partial = new_child_mf(0x2000 + sector * SECTOR_SIZE,
+                                              SECTOR_SIZE, false,
+                                              TEXTURE_ACC_R, req, 2 + sector,
+                                              sector_mask(sector),
+                                              byte_mask_range(sector * SECTOR_SIZE,
+                                                              SECTOR_SIZE));
+            cache.fill(partial, 2 + sector);
+            cache.cycle();
+            CHECK_FALSE(cache.access_ready());
+        }
+        mem_fetch *final_resp = new_child_mf(0x2000 + 3 * SECTOR_SIZE,
+                                             SECTOR_SIZE, false, TEXTURE_ACC_R,
+                                             req, 5, sector_mask(3),
+                                             byte_mask_range(3 * SECTOR_SIZE,
+                                                             SECTOR_SIZE));
+        cache.fill(final_resp, 5);
+    } else {
+        cache.fill(req, 2);
+    }
+    cache.cycle();
+    CHECK_TRUE(cache.access_ready());
+    CHECK_TRUE(cache.next_access() == read);
+}
+
+TEST(parameter_pairwise_smoke_matrix)
+{
+    const pairwise_smoke_case cases[] = {
+        {"small_direct_mapped", "N:1:64:1,L:R:m:N:L,A:1:1,64", false, false, false},
+        {"large_high_assoc", "N:256:128:16,L:R:m:N:X,A:64:8,128", false, false, false},
+        {"sector_assoc", "S:4:128:4,L:B:m:N:L,S:4:2,8", false, false, true},
+        {"streaming_on_fill", "N:8:64:2,L:R:s:N:L,A:8:2,16", false, false, false},
+        {"explicit_narrow_port", "N:4:64:2,L:B:m:F:L,A:4:2,16:1,8", false, false, false},
+        {"texture_fifo", "N:4:128:4,L:R:m:N:L,F:4:2,4:2", true, false, false},
+        {"sector_texture_fifo", "S:4:128:4,L:R:m:N:L,T:4:2,4:2", true, true, false},
+    };
+    for (const pairwise_smoke_case &entry : cases) {
+        if (entry.texture)
+            run_texture_smoke(entry.text, entry.sector_texture);
+        else
+            run_data_smoke(entry.text, entry.sector_assoc);
+    }
 }
 
 TEST(address_mapping_boundaries)
@@ -1136,6 +1340,8 @@ int main()
 
     RUN_TEST(config_sector_and_streaming);
     RUN_TEST(status_string_tables);
+    RUN_TEST(parameter_single_axis_matrix);
+    RUN_TEST(parameter_pairwise_smoke_matrix);
     RUN_TEST(address_mapping_boundaries);
     RUN_TEST(tag_fill_hit_reserved_and_sector_miss);
     RUN_TEST(tag_lru_fifo_flush_invalidate);

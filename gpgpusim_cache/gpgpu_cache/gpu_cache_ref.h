@@ -849,6 +849,7 @@ class cache_config {
     return m_write_alloc_policy;
   }
   write_policy_t get_write_policy() { return m_write_policy; }
+  unsigned get_data_port_width() const { return m_data_port_width; }
 
  protected:
   void exit_parse_error() {
