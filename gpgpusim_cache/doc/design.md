@@ -289,15 +289,15 @@ cfg.set_defer_hit_response(false);
 
 | 对象 | 接口 | 检查范围 |
 |------|------|----------|
-| `tag_array` | `final_state_clean()` | pending line 表为空，所有 line invalid 且 unpinned |
+| `tag_array` | `no_pending_accesses()` / `final_state_clean()` | final check 阶段检查 pending line 表为空且所有 line unpinned；cleanup 后检查所有 line invalid |
 | `mshr_table` | `empty()` | MSHR entry 表和 ready response 队列为空 |
-| `baseline_cache` | `queues_empty()` / `final_state_clean()` | miss queue、MSHR、extra fields、hit response queue、ready response queue、pending response index、tag line |
-| `tex_cache` | `queues_empty()` / `final_state_clean()` | fragment FIFO、request FIFO、ROB、result FIFO、extra fields、tag line、texture data block |
+| `baseline_cache` | `queues_empty()` / `no_pending_accesses()` / `final_state_clean()` | final check 阶段检查 miss queue、MSHR、extra fields、hit response queue、ready response queue、pending response index 和 line pin；cleanup 后检查 tag line invalid |
+| `tex_cache` | `queues_empty()` / `no_pending_accesses()` / `final_state_clean()` | final check 阶段检查 fragment FIFO、request FIFO、ROB、result FIFO、extra fields 和 tag line pin；cleanup 后检查 tag line 和 texture data block 回初始态 |
 
-final check 不提供强制清空内部状态的后门。测试必须先通过正常 `cycle()`、`fill()`、`next_access()` drain 到空，再调用 `invalidate()` 将 line/data block 回到初始态，最后断言 `final_state_clean()==true`。
+final check 不提供强制清空内部状态的后门。白盒测试通过 RAII guard 绑定每个直接创建的 `baseline_cache` 派生对象、`tex_cache`、`tag_array` 和 `mshr_table`；用例退出时 guard 先通过正常 `cycle()`、`fill()`、`next_access()` drain 到空，在调用 `invalidate()` 之前断言 `no_pending_accesses()==true` 或 `empty()==true`，确认 queue/FIFO/MSHR/pending ref/refcount 已经自然清空。该检查通过后，guard 才调用 `invalidate()` 做测试 cleanup，并用 `final_state_clean()==true` 确认 cleanup 后 line/data block 回到初始态。
 
-故障注入类用例如果刻意制造下游背压或未完成请求，不应直接套用 final check；它们必须在可收敛路径补 drain，或在 testcase 中说明该场景故意保持 pending。
+故障注入类用例如果刻意制造下游背压或未完成请求，必须在断言完成后恢复可收敛条件，让 guard 能通过正常路径完成收尾；不能用测试后门直接清空内部状态。
 
 ### 设计状态
 
-已进入代码实现并通过默认回归。2026-06-02 当前结果：`./run.sh` 通过 unit `13/13`、scenario `86/86 checks`、whitebox `40/40`、death `16/16`；`./coverage.sh coverage-final-check` 总覆盖率 Region `56.43%`、Function `73.52%`、Line `70.25%`、Branch `60.21%`。
+已进入代码实现并通过默认回归。2026-06-02 当前结果：`./run.sh` 通过 unit `13/13`、scenario `86/86 checks`、whitebox `40/40`、death `16/16`；`./coverage.sh coverage-final-guards` 总覆盖率 Region `56.79%`、Function `74.48%`、Line `70.64%`、Branch `60.57%`。

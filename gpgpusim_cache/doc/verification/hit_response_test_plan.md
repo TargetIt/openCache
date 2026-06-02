@@ -14,7 +14,7 @@
 6. texture cache 不改行为，但要保留对齐测试，证明现有 texture 模型仍通过。
 7. 每个 accepted request 必须 exactly-once 返回：不能丢、不能重复、不能提前。
 8. pending response 对应 cache line 必须被 pin，`next_access()` 前不能被 replacement 选为 victim。
-9. 用例收尾必须能通过 final check：内部 queue/FIFO/MSHR/pending ref 清空，line 或 texture data block 回到初始状态。
+9. 白盒用例收尾必须能通过 final guard：每个直接创建的 cache/tag/MSHR 对象都要自动检查内部 queue/FIFO/MSHR/pending ref 清空，line 或 texture data block 回到初始状态。
 
 ## Implemented Feature
 
@@ -35,8 +35,8 @@
 | F-HITLAT-013 | write-evict pinned invalid | write-evict hit 立即 invalid 但仍 pinned 时不能作为 victim |
 | F-HITLAT-014 | bounded hit response queue | hit response queue 有限容量和背压 |
 | F-HITLAT-015 | DataStore snapshot timing | hit accepted 时快照语义与延迟 token 返回不混淆 |
-| F-FINAL-001 | baseline cache final check | baseline/read-only/data cache 收尾状态可观测并可回到初始态 |
-| F-FINAL-002 | texture cache final check | texture FIFO/ROB/extra fields/tag/data block 收尾状态可观测并可回到初始态 |
+| F-FINAL-001 | baseline/tag/MSHR final guard | baseline/read-only/data cache、tag_array、mshr_table 收尾状态自动检查并可回到初始态 |
+| F-FINAL-002 | texture cache final guard | texture FIFO/ROB/extra fields/tag/data block 收尾状态自动检查并可回到初始态 |
 
 ## Implemented Testcase
 
@@ -62,8 +62,8 @@
 | TC-HITLAT-018 | F-HITLAT-013 | unit | Implemented | write-evict hit 立即 invalid 但仍 pinned 时，同 set miss 不能复用该 invalid line |
 | TC-HITLAT-019 | F-HITLAT-014 | unit | Implemented | hit response queue 达容量上限后返回 `RESERVATION_FAIL`，drain 后恢复接收 |
 | TC-HITLAT-020 | F-HITLAT-015 | unit | Implemented | DataStore hit accepted 时快照语义被文档和场景测试固定，不误当成 coherence 行为 |
-| TC-FINAL-001 | F-FINAL-001 | unit | Implemented | baseline cache 收尾 drain 后，invalidate 使 queue/MSHR/pending ref 和所有 line 回初始状态 |
-| TC-FINAL-002 | F-FINAL-002 | unit | Implemented | texture cache 收尾 drain 后，invalidate 使 FIFO/ROB/extra fields/tag/data block 回初始状态 |
+| TC-FINAL-001 | F-FINAL-001 | unit | Implemented | 每个白盒用例中创建的 baseline cache 派生对象、tag_array、mshr_table 均由 final guard 收尾检查 |
+| TC-FINAL-002 | F-FINAL-002 | unit | Implemented | 每个白盒用例中创建的 texture cache 均由 final guard 收尾检查 |
 
 ## 关键测试场景
 
@@ -128,8 +128,10 @@
 
 1. baseline/read-only/data cache 提供 `queues_empty()` 和 `final_state_clean()`，覆盖 miss queue、MSHR、hit response queue、ready response queue、pending response index、extra fields、tag pending lines 和 line pin 状态。
 2. texture cache 提供 `queues_empty()` 和 `final_state_clean()`，覆盖 fragment FIFO、request FIFO、ROB、result FIFO、extra fields、tag line 和 texture data block。
-3. 用例收尾 helper 先 drain 到内部队列空，再调用 `invalidate()`，最后断言 `final_state_clean()==true` 且外部 memory queue 为空。
-4. 故障注入类用例如果刻意制造下游背压，不直接套用 final check；必须在可收敛路径补 drain 或另行说明。
+3. `tag_array` 提供 `final_state_clean()`，`mshr_table` 提供 `empty()`，覆盖裸白盒对象的收尾状态。
+4. 白盒测试通过 RAII guard 绑定每个直接创建的对象，用例退出时自动 drain 到内部队列空，在调用 `invalidate()` 之前先断言 `no_pending_accesses()==true` 或 `empty()==true`。
+5. invalidate 只作为 final check 通过后的测试 cleanup；cleanup 后再断言 `final_state_clean()==true`，确认 line/data block 回初始态。
+6. 故障注入类用例如果刻意制造下游背压，必须在断言完成后恢复可收敛条件，让 guard 通过正常路径完成收尾。
 
 ### Refcount / pin
 
@@ -153,7 +155,9 @@
 
 2026-06-02 已完成第一阶段实现，`TC-HITLAT-001..020` 均反标到 `test/test_cache_whitebox.cc` 的 `hitlat_*` 用例。
 
-2026-06-02 交付模式调整为默认新模式，旧模式仅作为显式兼容开关保留；所有默认回归用例按新模式运行。新增 `TC-FINAL-001/002` final check 用例后，`./run.sh` 通过：unit `13/13`、scenario `86/86 checks`、whitebox `40/40`、death `16/16`。覆盖率通过 `./coverage.sh coverage-final-check` 刷新：Total Region `56.43%`、Function `73.52%`、Line `70.25%`、Branch `60.21%`。
+2026-06-02 交付模式调整为默认新模式，旧模式仅作为显式兼容开关保留；所有默认回归用例按新模式运行。新增 `TC-FINAL-001/002` final check 专项用例后，`./run.sh` 通过。
+
+2026-06-02 final check 升级为白盒用例对象级 RAII guard：`test_cache_whitebox.cc` 中每个直接创建的 baseline/read-only/data cache、texture cache、tag_array、mshr_table 都在用例退出时自动收尾检查。`./run.sh` 通过：unit `13/13`、scenario `86/86 checks`、whitebox `40/40`、death `16/16`。覆盖率通过 `./coverage.sh coverage-final-guards` 刷新：Total Region `56.79%`、Function `74.48%`、Line `70.64%`、Branch `60.57%`。
 
 交付时同步更新：
 

@@ -55,8 +55,8 @@
 | F-HITLAT-013 | write-evict pinned invalid | 白盒/风险 | write-evict hit 立即 invalid 但仍 pinned 时不能作为 victim | TC-HITLAT-018 |
 | F-HITLAT-014 | bounded hit response queue | 异常/风险 | hit response queue 有限容量和背压 | TC-HITLAT-019 |
 | F-HITLAT-015 | DataStore snapshot timing | functional/风险 | hit accepted 时快照语义与延迟 token 返回不混淆 | TC-HITLAT-020 |
-| F-FINAL-001 | baseline cache final check | 流程/白盒 | 用例收尾 drain 后，miss queue、MSHR、hit response queue、ready queue、pending ref 与 tag line 均回到初始状态 | TC-FINAL-001 |
-| F-FINAL-002 | texture cache final check | 流程/白盒 | 用例收尾 drain 后，fragment/request/result FIFO、ROB、extra fields、tag line 与 texture data block 均回到初始状态 | TC-FINAL-002 |
+| F-FINAL-001 | baseline/tag/MSHR final guard | 流程/白盒 | 每个白盒用例中创建的 baseline cache 派生对象、tag_array、mshr_table 在用例退出时自动收尾检查 | TC-FINAL-001 |
+| F-FINAL-002 | texture cache final guard | 流程/白盒 | 每个白盒用例中创建的 texture cache 在用例退出时自动收尾检查 | TC-FINAL-002 |
 | F-WR-001 | write-back hit | 白盒 | dirty no lower write | TC-WR-001 |
 | F-WR-002 | write-through hit | 白盒 | WRITE_REQUEST_SENT | TC-WR-002 |
 | F-WR-003 | write-evict hit | 白盒 | write event + invalidation | TC-WR-003 |
@@ -106,5 +106,5 @@
 | F-HITLAT-013 | write-evict hit；立即 invalid 但保持 pin | write-evict hit 后插入同 set conflict miss | victim 选择先查 refcount，再查 invalid 状态 | pinned invalid line 不能复用 |
 | F-HITLAT-014 | 有限 hit response queue；容量边界 | 连续 hit 填满 queue，再发起额外 hit | 触发 backpressure，drain 后再访问 | queue 满时 fail，drain 后恢复接收 |
 | F-HITLAT-015 | DataStore 快照语义；未来 payload 场景 | hit accepted 后延迟期间插入同地址写 | 固化读快照时机，token 延迟交付 | 返回 accepted 时刻快照，不误判为 coherence 行为 |
-| F-FINAL-001 | baseline/read-only/data cache；默认新模式 | miss/fill/hit 序列完成后收尾 | drain 到 queue/MSHR/pending response 空，随后 invalidate | `final_state_clean()==true`，所有 line invalid/unpinned，外部 mem queue 为空 |
-| F-FINAL-002 | texture cache；默认新模式 | texture miss/fill/hit-reserved 序列完成后收尾 | drain 到 FIFO/ROB/extra fields 空，随后 invalidate | `final_state_clean()==true`，tag/data block 回初始态，外部 mem queue 为空 |
+| F-FINAL-001 | baseline/read-only/data cache、tag_array、mshr_table；默认新模式 | 每个白盒用例中直接创建的对象 | RAII guard 在用例退出时 drain、pop ready，先检查 queue/MSHR/pending ref/refcount 清空，再 cleanup invalidate | invalidate 前 `no_pending_accesses()==true` 或 `empty()==true`；cleanup 后 line invalid/unpinned，外部 mem queue 为空 |
+| F-FINAL-002 | texture cache；默认新模式 | 每个白盒用例中直接创建的 texture cache | RAII guard 在用例退出时 drain FIFO/ROB/result，先检查 FIFO/ROB/extra fields/refcount 清空，再 cleanup invalidate | invalidate 前 `no_pending_accesses()==true`；cleanup 后 tag/data block 回初始态 |

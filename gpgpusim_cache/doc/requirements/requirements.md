@@ -106,6 +106,7 @@
 | GPGPUSIM-HITLAT-010 | 将交付默认模式切换为新模式，旧模式仅通过显式 `set_defer_hit_response(false)` 保留 | 已完成 |
 | GPGPUSIM-HITLAT-011 | 将默认回归用例适配到新模式，修正 hit 后未 drain 就替换的旧同步假设 | 已完成 |
 | GPGPUSIM-HITLAT-012 | 增加 final check，可检查 baseline/texture cache 收尾后 queue/FIFO/MSHR/pending ref 和 line/data block 是否回初始态 | 已完成 |
+| GPGPUSIM-HITLAT-013 | 将 final check 升级为白盒用例对象级 RAII guard，覆盖每个直接创建的 cache/tag/MSHR 对象 | 已完成 |
 
 ### 验收标准
 
@@ -116,7 +117,7 @@
 5. 新增和待实现 feature/testcase 已按配置、输入、流程、输出四维记录。
 6. 默认新模式下 hit 经 `access_ready()/next_access()` 延迟返回；旧模式仅通过显式 `set_defer_hit_response(false)` 保持兼容。
 7. `TC-HITLAT-001..020`、`TC-FINAL-001/002` 已反标到白盒用例，默认 `./run.sh` 全通过。
-8. final check 覆盖 baseline/read-only/data cache 和 texture cache 的正常收尾路径。
+8. final check 覆盖 `test_cache_whitebox.cc` 中每个直接创建的 baseline/read-only/data cache、texture cache、tag_array、mshr_table。
 9. 提交前 `git diff --check` 通过。
 
 ### 更新时间
@@ -164,10 +165,10 @@
 
 | 指标 | 覆盖率 |
 |------|--------|
-| Region | 56.43% |
-| Function | 73.52% |
-| Line | 70.25% |
-| Branch | 60.21% |
+| Region | 56.79% |
+| Function | 74.48% |
+| Line | 70.64% |
+| Branch | 60.57% |
 
 ### 更新时间
 

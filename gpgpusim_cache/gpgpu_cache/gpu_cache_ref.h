@@ -1014,6 +1014,7 @@ class tag_array {
 
   unsigned size() const { return m_config.get_num_lines(); }
   cache_block_t *get_block(unsigned idx) { return m_lines[idx]; }
+  bool no_pending_accesses() const;
   bool final_state_clean() const;
 
   void flush();       // flush all written entries
@@ -1379,6 +1380,7 @@ class baseline_cache : public cache_t {
   /// Pop next ready access.
   mem_fetch *next_access();
   bool queues_empty() const;
+  bool no_pending_accesses() const;
   bool final_state_clean() const;
   // flash invalidate all entries in cache
   void flush() { m_tag_array->flush(); }
@@ -1869,6 +1871,7 @@ class tex_cache : public cache_t {
   mem_fetch *next_access() { return m_result_fifo.pop(); }
   void invalidate();
   bool queues_empty() const;
+  bool no_pending_accesses() const;
   bool final_state_clean() const;
   void display_state(FILE *fp) const;
 

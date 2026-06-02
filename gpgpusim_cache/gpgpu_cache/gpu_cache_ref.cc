@@ -471,8 +471,6 @@ void tag_array::flush() {
 }
 
 void tag_array::invalidate() {
-  if (!is_used) return;
-
   for (unsigned i = 0; i < m_config.get_num_lines(); i++)
     for (unsigned j = 0; j < SECTOR_CHUNCK_SIZE; j++)
       m_lines[i]->set_status(INVALID, mem_access_sector_mask_t().set(j));
@@ -481,13 +479,21 @@ void tag_array::invalidate() {
   is_used = false;
 }
 
-bool tag_array::final_state_clean() const {
+bool tag_array::no_pending_accesses() const {
   if (!pending_lines.empty()) return false;
 
   for (unsigned i = 0; i < m_config.get_num_lines(); i++) {
-    if (!m_lines[i]->is_invalid_line()) return false;
     if (m_lines[i]->is_pinned()) return false;
   }
+
+  return true;
+}
+
+bool tag_array::final_state_clean() const {
+  if (!no_pending_accesses()) return false;
+
+  for (unsigned i = 0; i < m_config.get_num_lines(); i++)
+    if (!m_lines[i]->is_invalid_line()) return false;
 
   return true;
 }
@@ -1296,8 +1302,12 @@ bool baseline_cache::queues_empty() const {
          m_pending_response_indices.empty() && m_mshrs.empty();
 }
 
+bool baseline_cache::no_pending_accesses() const {
+  return queues_empty() && m_tag_array->no_pending_accesses();
+}
+
 bool baseline_cache::final_state_clean() const {
-  return queues_empty() && m_tag_array->final_state_clean();
+  return no_pending_accesses() && m_tag_array->final_state_clean();
 }
 
 /// Sends next request to lower level of memory
@@ -2244,8 +2254,12 @@ bool tex_cache::queues_empty() const {
          m_result_fifo.empty() && m_extra_mf_fields.empty();
 }
 
+bool tex_cache::no_pending_accesses() const {
+  return queues_empty() && m_tags.no_pending_accesses();
+}
+
 bool tex_cache::final_state_clean() const {
-  if (!queues_empty()) return false;
+  if (!no_pending_accesses()) return false;
   if (!m_tags.final_state_clean()) return false;
 
   for (unsigned i = 0; i < m_config.get_num_lines(); i++)

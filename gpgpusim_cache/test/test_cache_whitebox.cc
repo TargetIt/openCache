@@ -170,7 +170,8 @@ static void drain_one_level(baseline_cache &cache, simple_mem_interface &mem,
         while (!mem.queue.empty()) {
             mem_fetch *resp = mem.queue.front();
             mem.queue.pop_front();
-            cache.fill(resp, cycle + step);
+            if (cache.waiting_for_fill(resp))
+                cache.fill(resp, cycle + step);
         }
         while (cache.access_ready())
             cache.next_access();
@@ -202,19 +203,94 @@ static void final_check(baseline_cache &cache, simple_mem_interface &mem,
                         unsigned cycle)
 {
     drain_one_level(cache, mem, cycle);
+    CHECK_TRUE(cache.no_pending_accesses());
+    CHECK_TRUE(mem.queue.empty());
     cache.invalidate();
     CHECK_TRUE(cache.final_state_clean());
-    CHECK_TRUE(mem.queue.empty());
 }
 
 static void final_check(tex_cache &cache, simple_mem_interface &mem,
                         unsigned cycle)
 {
     drain_texture(cache, mem, cycle);
+    CHECK_TRUE(cache.no_pending_accesses());
+    CHECK_TRUE(mem.queue.empty());
     cache.invalidate();
     CHECK_TRUE(cache.final_state_clean());
-    CHECK_TRUE(mem.queue.empty());
 }
+
+class baseline_final_check_guard {
+public:
+    baseline_final_check_guard(baseline_cache &cache, simple_mem_interface &mem,
+                               unsigned cycle = 0)
+        : m_cache(cache), m_mem(mem), m_cycle(cycle), m_active(true) {}
+    ~baseline_final_check_guard()
+    {
+        if (m_active)
+            final_check(m_cache, m_mem, m_cycle);
+    }
+    void dismiss() { m_active = false; }
+
+private:
+    baseline_cache &m_cache;
+    simple_mem_interface &m_mem;
+    unsigned m_cycle;
+    bool m_active;
+};
+
+class texture_final_check_guard {
+public:
+    texture_final_check_guard(tex_cache &cache, simple_mem_interface &mem,
+                              unsigned cycle = 0)
+        : m_cache(cache), m_mem(mem), m_cycle(cycle), m_active(true) {}
+    ~texture_final_check_guard()
+    {
+        if (m_active)
+            final_check(m_cache, m_mem, m_cycle);
+    }
+    void dismiss() { m_active = false; }
+
+private:
+    tex_cache &m_cache;
+    simple_mem_interface &m_mem;
+    unsigned m_cycle;
+    bool m_active;
+};
+
+class tag_array_final_check_guard {
+public:
+    explicit tag_array_final_check_guard(tag_array &tags)
+        : m_tags(tags), m_active(true) {}
+    ~tag_array_final_check_guard()
+    {
+        if (!m_active)
+            return;
+        CHECK_TRUE(m_tags.no_pending_accesses());
+        m_tags.invalidate();
+        CHECK_TRUE(m_tags.final_state_clean());
+    }
+    void dismiss() { m_active = false; }
+
+private:
+    tag_array &m_tags;
+    bool m_active;
+};
+
+class mshr_final_check_guard {
+public:
+    explicit mshr_final_check_guard(mshr_table &mshr)
+        : m_mshr(mshr), m_active(true) {}
+    ~mshr_final_check_guard()
+    {
+        if (m_active)
+            CHECK_TRUE(m_mshr.empty());
+    }
+    void dismiss() { m_active = false; }
+
+private:
+    mshr_table &m_mshr;
+    bool m_active;
+};
 
 static void fill_read_only_line(read_only_cache &cache, simple_mem_interface &mem,
                                 new_addr_type addr, unsigned cycle)
@@ -347,6 +423,7 @@ static void run_data_smoke(const char *text, bool sector_assoc)
     if (cfg.get_write_policy() == READ_ONLY) {
         read_only_cache cache("ParamReadOnly", cfg, 0, 0, &mem,
                               IN_L1C_MISS_QUEUE, OTHER_GPU_CACHE, &gpu);
+        baseline_final_check_guard final_cache(cache, mem);
         std::list<cache_event> events;
         mem_fetch *read = new_mf(0x1000, 4, false, GLOBAL_ACC_R, 1);
         CHECK_EQ(cache.access(read->get_addr(), read, 1, events), MISS);
@@ -360,6 +437,7 @@ static void run_data_smoke(const char *text, bool sector_assoc)
 
     l1_cache cache("ParamData", cfg, 0, 0, &mem, &allocator,
                    IN_L1D_MISS_QUEUE, &gpu, L1_GPU_CACHE);
+    baseline_final_check_guard final_cache(cache, mem);
     std::list<cache_event> events;
     mem_fetch *read = new_mf(0x1000, 4, false, GLOBAL_ACC_R, 1);
     CHECK_EQ(cache.access(read->get_addr(), read, 1, events), MISS);
@@ -402,6 +480,7 @@ static void run_texture_smoke(const char *text, bool sector_texture)
     cache_config cfg = make_config(text);
     tex_cache cache("ParamTex", cfg, 0, 0, &mem, IN_L1T_MISS_QUEUE,
                     IN_SHADER_L1T_ROB);
+    texture_final_check_guard final_cache(cache, mem);
     std::list<cache_event> events;
     mem_fetch *read = new_mf(0x2000, 4, false, TEXTURE_ACC_R, 1);
     CHECK_EQ(cache.access(read->get_addr(), read, 1, events), MISS);
@@ -463,6 +542,7 @@ TEST(sequence_same_line_hit_miss_matrix)
     cache_config cfg = make_config("N:4:64:2,L:B:m:F:L,A:4:2,16");
     l1_cache cache("SeqLine", cfg, 0, 0, &mem, &allocator,
                    IN_L1D_MISS_QUEUE, &gpu, L1_GPU_CACHE);
+    baseline_final_check_guard final_cache(cache, mem);
     std::list<cache_event> events;
 
     mem_fetch *cold = new_mf(0x1000, 4, false, GLOBAL_ACC_R, 1);
@@ -484,6 +564,7 @@ TEST(sequence_same_line_hit_miss_matrix)
     cache_config we_cfg = make_config("N:4:64:2,L:E:m:N:L,A:4:2,16");
     l1_cache we("SeqWriteEvict", we_cfg, 0, 0, &we_mem, &allocator,
                 IN_L1D_MISS_QUEUE, &gpu, L1_GPU_CACHE);
+    baseline_final_check_guard final_we(we, we_mem);
     events.clear();
     mem_fetch *warm = new_mf(0x2000, 4, false, GLOBAL_ACC_R, 1);
     CHECK_EQ(we.access(warm->get_addr(), warm, 1, events), MISS);
@@ -494,6 +575,7 @@ TEST(sequence_same_line_hit_miss_matrix)
     CHECK_EQ(we.access(evicting_write->get_addr(), evicting_write, 3, events),
              HIT);
     CHECK_TRUE(has_event(events, WRITE_REQUEST_SENT));
+    drain_one_level(we, we_mem, 4);
 
     events.clear();
     mem_fetch *after_evict = new_mf(0x2000, 4, false, GLOBAL_ACC_R, 4);
@@ -509,6 +591,7 @@ TEST(sequence_same_set_and_full_cache_eviction)
     cache_config cfg = make_config("N:2:64:1,L:B:m:F:L,A:4:2,16");
     l1_cache cache("SeqFullCache", cfg, 0, 0, &mem, &allocator,
                    IN_L1D_MISS_QUEUE, &gpu, L1_GPU_CACHE);
+    baseline_final_check_guard final_cache(cache, mem);
     std::list<cache_event> events;
 
     mem_fetch *set0 = new_mf(0x0000, 4, false, GLOBAL_ACC_R, 1);
@@ -546,6 +629,7 @@ TEST(sequence_sector_partial_hit_miss_matrix)
 {
     cache_config cfg = make_config("S:1:128:1,L:B:m:F:L,A:4:2,16");
     tag_array tags(cfg, 0, 0);
+    tag_array_final_check_guard final_tags(tags);
     unsigned idx = 0;
     mem_fetch *sec0 = new_mf(0x3000, SECTOR_SIZE, false, GLOBAL_ACC_R, 1,
                              sector_mask(0),
@@ -576,6 +660,7 @@ TEST(sequence_mshr_merge_and_pending_matrix)
     cache_config cfg = make_config("N:4:64:2,L:R:m:N:L,A:4:2,16");
     read_only_cache cache("SeqMshrMerge", cfg, 0, 0, &mem, IN_L1C_MISS_QUEUE,
                           OTHER_GPU_CACHE, &gpu);
+    baseline_final_check_guard final_cache(cache, mem);
     std::list<cache_event> events;
 
     mem_fetch *first = new_mf(0x4000, 4, false, GLOBAL_ACC_R, 1);
@@ -601,6 +686,7 @@ TEST(sequence_mshr_merge_and_pending_matrix)
     cache_config fail_cfg = make_config("N:4:64:4,L:R:m:N:L,A:4:1,16");
     read_only_cache fail_cache("SeqMshrMergeFail", fail_cfg, 0, 0, &fail_mem,
                                IN_L1C_MISS_QUEUE, OTHER_GPU_CACHE, &gpu);
+    baseline_final_check_guard final_fail_cache(fail_cache, fail_mem);
     events.clear();
     mem_fetch *base = new_mf(0x5000, 4, false, GLOBAL_ACC_R, 1);
     CHECK_EQ(fail_cache.access(base->get_addr(), base, 1, events), MISS);
@@ -618,6 +704,7 @@ TEST(sequence_texture_hit_reserved_order_matrix)
     cache_config cfg = make_config("N:4:128:4,L:R:m:N:L,F:4:4,4:1");
     tex_cache cache("SeqTex", cfg, 0, 0, &mem, IN_L1T_MISS_QUEUE,
                     IN_SHADER_L1T_ROB);
+    texture_final_check_guard final_cache(cache, mem);
     std::list<cache_event> events;
 
     mem_fetch *miss = new_mf(0x6000, 4, false, TEXTURE_ACC_R, 1);
@@ -696,6 +783,7 @@ TEST(tag_fill_hit_reserved_and_sector_miss)
 {
     cache_config cfg = make_config("N:4:64:2,L:R:m:N:L,A:4:2,8");
     tag_array tags(cfg, 0, 0);
+    tag_array_final_check_guard final_tags(tags);
     unsigned idx = 0;
     mem_fetch *read = new_mf(0x1000, 4, false, GLOBAL_ACC_R);
 
@@ -707,6 +795,7 @@ TEST(tag_fill_hit_reserved_and_sector_miss)
 
     cache_config sector_cfg = make_config("S:4:128:2,L:R:m:N:L,S:4:2,8");
     tag_array sector_tags(sector_cfg, 0, 0);
+    tag_array_final_check_guard final_sector_tags(sector_tags);
     mem_fetch *sec0 = new_mf(0x2000, 4, false, GLOBAL_ACC_R, 0,
                              sector_mask(0), byte_mask_range(0, 32));
     CHECK_EQ(sector_tags.access(0x2000, 1, idx, sec0), MISS);
@@ -720,6 +809,7 @@ TEST(tag_lru_fifo_flush_invalidate)
 {
     cache_config lru_cfg = make_config("N:1:64:2,L:R:m:N:L,A:4:2,8");
     tag_array lru(lru_cfg, 0, 0);
+    tag_array_final_check_guard final_lru(lru);
     unsigned idx = 0;
     mem_fetch *a = new_mf(0x0000, 4, false, GLOBAL_ACC_R);
     mem_fetch *b = new_mf(0x0040, 4, false, GLOBAL_ACC_R);
@@ -733,6 +823,7 @@ TEST(tag_lru_fifo_flush_invalidate)
 
     cache_config fifo_cfg = make_config("N:1:64:2,F:R:m:N:L,A:4:2,8");
     tag_array fifo(fifo_cfg, 0, 0);
+    tag_array_final_check_guard final_fifo(fifo);
     CHECK_EQ(fifo.access(0x0000, 1, idx, a), MISS); fifo.fill(idx, 2, a);
     CHECK_EQ(fifo.access(0x0040, 3, idx, b), MISS); fifo.fill(idx, 4, b);
     CHECK_EQ(fifo.access(0x0000, 5, idx, a), HIT);
@@ -750,6 +841,7 @@ TEST(tag_lru_fifo_flush_invalidate)
     cache_config wb_cfg = make_config("N:2:64:1,L:B:m:F:L,A:4:2,8");
     l1_cache cache("Flush", wb_cfg, 0, 0, &mem, &allocator,
                    IN_L1D_MISS_QUEUE, &gpu, L1_GPU_CACHE);
+    baseline_final_check_guard final_cache(cache, mem);
     std::list<cache_event> events;
     mem_fetch *fr = new_mf(0x1000, 4, false, GLOBAL_ACC_R);
     CHECK_EQ(cache.access(fr->get_addr(), fr, 1, events), MISS);
@@ -783,6 +875,7 @@ TEST(tag_on_fill_all_reserved)
 {
     cache_config on_fill = make_config("N:1:64:1,L:R:f:N:L,A:4:2,8");
     tag_array tags(on_fill, 0, 0);
+    tag_array_final_check_guard final_tags(tags);
     unsigned idx = 0;
     mem_fetch *a = new_mf(0x0000, 4, false, GLOBAL_ACC_R);
     CHECK_EQ(tags.probe(0x0000, idx, a, false), MISS);
@@ -791,6 +884,7 @@ TEST(tag_on_fill_all_reserved)
 
     cache_config on_miss = make_config("N:1:64:1,L:R:m:N:L,A:4:2,8");
     tag_array one_way(on_miss, 0, 0);
+    tag_array_final_check_guard final_one_way(one_way);
     mem_fetch *reserved = new_mf(0x0000, 4, false, GLOBAL_ACC_R);
     mem_fetch *conflict = new_mf(0x0040, 4, false, GLOBAL_ACC_R);
     CHECK_EQ(one_way.access(0x0000, 2, idx, reserved), MISS);
@@ -807,6 +901,7 @@ TEST(tag_on_fill_all_reserved)
 TEST(mshr_capacity_order_raw)
 {
     mshr_table mshr(2, 2);
+    mshr_final_check_guard final_mshr(mshr);
     mem_fetch *r0 = new_mf(0x1000, 4, false, GLOBAL_ACC_R);
     mem_fetch *r1 = new_mf(0x1000, 4, false, GLOBAL_ACC_R);
     mem_fetch *r2 = new_mf(0x2000, 4, false, GLOBAL_ACC_R);
@@ -826,14 +921,22 @@ TEST(mshr_capacity_order_raw)
     CHECK_TRUE(mshr.next_access() == r0);
     CHECK_TRUE(mshr.next_access() == r1);
     CHECK_FALSE(mshr.access_ready());
+    mshr.mark_ready(0x2000, has_atomic);
+    CHECK_TRUE(mshr.next_access() == r2);
+    CHECK_FALSE(mshr.access_ready());
 
     mshr_table raw(4, 4);
+    mshr_final_check_guard final_raw(raw);
     mem_fetch *w = new_mf(0x4000, 4, true, GLOBAL_ACC_W);
     mem_fetch *r = new_mf(0x4000, 4, false, GLOBAL_ACC_R);
     raw.add(0x4000, w);
     CHECK_FALSE(raw.is_read_after_write_pending(0x4000));
     raw.add(0x4000, r);
     CHECK_TRUE(raw.is_read_after_write_pending(0x4000));
+    raw.mark_ready(0x4000, has_atomic);
+    CHECK_TRUE(raw.next_access() == w);
+    CHECK_TRUE(raw.next_access() == r);
+    CHECK_FALSE(raw.access_ready());
 }
 
 TEST(read_only_flow_and_fail_stats)
@@ -843,6 +946,7 @@ TEST(read_only_flow_and_fail_stats)
     cache_config cfg = make_config("N:4:64:2,L:R:m:N:L,A:4:2,8");
     read_only_cache cache("RO", cfg, 0, 0, &mem, IN_L1C_MISS_QUEUE,
                           OTHER_GPU_CACHE, &gpu);
+    baseline_final_check_guard final_cache(cache, mem);
     std::list<cache_event> events;
     mem_fetch *r = new_mf(0x1000, 4, false, GLOBAL_ACC_R);
     CHECK_EQ(cache.access(r->get_addr(), r, 1, events), MISS);
@@ -856,6 +960,7 @@ TEST(read_only_flow_and_fail_stats)
     cache_config small_cfg = make_config("N:2:64:1,L:R:m:N:L,A:2:1,1");
     read_only_cache fail_cache("ROFail", small_cfg, 0, 0, &small_mem,
                                IN_L1C_MISS_QUEUE, OTHER_GPU_CACHE, &gpu);
+    baseline_final_check_guard final_fail_cache(fail_cache, small_mem);
     mem_fetch *fail = new_mf(0x2000, 4, false, GLOBAL_ACC_R);
     events.clear();
     CHECK_EQ(fail_cache.access(fail->get_addr(), fail, 4, events), MISS);
@@ -866,6 +971,7 @@ TEST(read_only_flow_and_fail_stats)
     CHECK_EQ(fail_cache.get_fail_stats(GLOBAL_ACC_R, MISS_QUEUE_FULL), 1ull);
     fail_cache.cycle();
     CHECK_EQ(small_mem.queue.size(), 0u);
+    small_mem.max_queue_size = 64;
 }
 
 TEST(fail_reason_counters)
@@ -879,6 +985,7 @@ TEST(fail_reason_counters)
         cache_config cfg = make_config("N:1:64:1,L:B:m:F:L,A:4:2,8");
         l1_cache cache("LineAllocFail", cfg, 0, 0, &mem, &allocator,
                        IN_L1D_MISS_QUEUE, &gpu, L1_GPU_CACHE);
+        baseline_final_check_guard final_cache(cache, mem);
         mem_fetch *first = new_mf(0x0000, 4, false, GLOBAL_ACC_R);
         CHECK_EQ(cache.access(first->get_addr(), first, 1, events), MISS);
         events.clear();
@@ -893,6 +1000,7 @@ TEST(fail_reason_counters)
         cache_config cfg = make_config("N:4:64:4,L:B:m:F:L,A:1:4,8");
         l1_cache cache("MshrEntryFail", cfg, 0, 0, &mem, &allocator,
                        IN_L1D_MISS_QUEUE, &gpu, L1_GPU_CACHE);
+        baseline_final_check_guard final_cache(cache, mem);
         events.clear();
         mem_fetch *first = new_mf(0x0000, 4, false, GLOBAL_ACC_R);
         CHECK_EQ(cache.access(first->get_addr(), first, 1, events), MISS);
@@ -908,6 +1016,7 @@ TEST(fail_reason_counters)
         cache_config cfg = make_config("N:4:64:4,L:B:m:F:L,A:1:1,8");
         l1_cache cache("MshrMergeFail", cfg, 0, 0, &mem, &allocator,
                        IN_L1D_MISS_QUEUE, &gpu, L1_GPU_CACHE);
+        baseline_final_check_guard final_cache(cache, mem);
         events.clear();
         mem_fetch *first = new_mf(0x1000, 4, false, GLOBAL_ACC_R);
         CHECK_EQ(cache.access(first->get_addr(), first, 1, events), MISS);
@@ -947,6 +1056,7 @@ TEST(data_cache_read_and_write_policies)
         cache_config cfg = make_config("N:4:64:2,L:B:m:F:L,A:8:4,16");
         l1_cache cache("WB", cfg, 0, 0, &mem, &allocator, IN_L1D_MISS_QUEUE,
                        &gpu, L1_GPU_CACHE);
+        baseline_final_check_guard final_cache(cache, mem);
         std::list<cache_event> events;
         mem_fetch *r = new_mf(0x1000, 4, false, GLOBAL_ACC_R);
         CHECK_EQ(cache.access(r->get_addr(), r, 1, events), MISS);
@@ -962,6 +1072,7 @@ TEST(data_cache_read_and_write_policies)
         cache_config cfg = make_config("N:4:64:2,L:T:m:N:L,A:8:4,16");
         l1_cache cache("WT", cfg, 0, 0, &mem, &allocator, IN_L1D_MISS_QUEUE,
                        &gpu, L1_GPU_CACHE);
+        baseline_final_check_guard final_cache(cache, mem);
         std::list<cache_event> events;
         mem_fetch *r = new_mf(0x1000, 4, false, GLOBAL_ACC_R);
         CHECK_EQ(cache.access(r->get_addr(), r, 1, events), MISS);
@@ -977,6 +1088,7 @@ TEST(data_cache_read_and_write_policies)
         cache_config cfg = make_config("N:4:64:2,L:E:m:N:L,A:8:4,16");
         l1_cache cache("WE", cfg, 0, 0, &mem, &allocator, IN_L1D_MISS_QUEUE,
                        &gpu, L1_GPU_CACHE);
+        baseline_final_check_guard final_cache(cache, mem);
         std::list<cache_event> events;
         mem_fetch *r = new_mf(0x1000, 4, false, GLOBAL_ACC_R);
         CHECK_EQ(cache.access(r->get_addr(), r, 1, events), MISS);
@@ -995,6 +1107,7 @@ TEST(data_cache_read_and_write_policies)
         cache_config cfg = make_config("N:4:64:2,L:L:m:N:L,A:8:4,16");
         l1_cache cache("LocalWbGlobalWt", cfg, 0, 0, &mem, &allocator,
                        IN_L1D_MISS_QUEUE, &gpu, L1_GPU_CACHE);
+        baseline_final_check_guard final_cache(cache, mem);
         std::list<cache_event> events;
         mem_fetch *global_r = new_mf(0x1000, 4, false, GLOBAL_ACC_R);
         CHECK_EQ(cache.access(global_r->get_addr(), global_r, 1, events),
@@ -1010,6 +1123,7 @@ TEST(data_cache_read_and_write_policies)
         l1_cache local_cache("LocalWbGlobalWtLocal", cfg, 0, 0, &local_mem,
                              &allocator, IN_L1D_MISS_QUEUE, &gpu,
                              L1_GPU_CACHE);
+        baseline_final_check_guard final_local_cache(local_cache, local_mem);
         events.clear();
         mem_fetch *local_r = new_mf(0x1080, 4, false, LOCAL_ACC_R);
         CHECK_EQ(local_cache.access(local_r->get_addr(), local_r, 5, events),
@@ -1032,6 +1146,7 @@ TEST(write_miss_events_and_writeback)
     cache_config nwa_cfg = make_config("N:4:64:2,L:T:m:N:L,A:8:4,16");
     l1_cache nwa("NWA", nwa_cfg, 0, 0, &nwa_mem, &allocator,
                  IN_L1D_MISS_QUEUE, &gpu, L1_GPU_CACHE);
+    baseline_final_check_guard final_nwa(nwa, nwa_mem);
     std::list<cache_event> events;
     mem_fetch *w0 = new_mf(0x1000, 4, true, GLOBAL_ACC_W);
     CHECK_EQ(nwa.access(w0->get_addr(), w0, 1, events), MISS);
@@ -1042,6 +1157,7 @@ TEST(write_miss_events_and_writeback)
     cache_config wa_cfg = make_config("N:4:64:2,L:B:m:W:L,A:8:4,16");
     l1_cache wa("WA", wa_cfg, 0, 0, &wa_mem, &allocator,
                 IN_L1D_MISS_QUEUE, &gpu, L1_GPU_CACHE);
+    baseline_final_check_guard final_wa(wa, wa_mem);
     events.clear();
     mem_fetch *w1 = new_mf(0x2000, 4, true, GLOBAL_ACC_W);
     CHECK_EQ(wa.access(w1->get_addr(), w1, 1, events), MISS);
@@ -1055,6 +1171,7 @@ TEST(write_miss_events_and_writeback)
     cache_config fow_cfg = make_config("N:4:64:2,L:B:m:F:L,A:8:4,16");
     l1_cache fow("FetchOnWrite", fow_cfg, 0, 0, &fow_mem, &allocator,
                  IN_L1D_MISS_QUEUE, &gpu, L1_GPU_CACHE);
+    baseline_final_check_guard final_fow(fow, fow_mem);
     events.clear();
     mem_fetch *full_write = new_mf(0x2400, 64, true, GLOBAL_ACC_W, 1,
                                    sector_mask(0), byte_mask_range(0, 64));
@@ -1072,6 +1189,7 @@ TEST(write_miss_events_and_writeback)
     cache_config wb_cfg = make_config("N:1:64:1,L:B:m:F:L,A:8:4,16");
     l1_cache wb("DirtyEvict", wb_cfg, 0, 0, &wb_mem, &allocator,
                 IN_L1D_MISS_QUEUE, &gpu, L1_GPU_CACHE);
+    baseline_final_check_guard final_wb(wb, wb_mem);
     events.clear();
     mem_fetch *r = new_mf(0x0000, 4, false, GLOBAL_ACC_R);
     CHECK_EQ(wb.access(r->get_addr(), r, 1, events), MISS);
@@ -1090,6 +1208,7 @@ TEST(write_miss_events_and_writeback)
     cache_config lazy_cfg = make_config("S:2:128:1,L:B:m:L:L,A:8:4,16");
     l1_cache lazy("LazyPartial", lazy_cfg, 0, 0, &lazy_mem, &allocator,
                   IN_L1D_MISS_QUEUE, &gpu, L1_GPU_CACHE);
+    baseline_final_check_guard final_lazy(lazy, lazy_mem);
     events.clear();
     mem_fetch *partial = new_mf(0x3000, 4, true, GLOBAL_ACC_W, 1,
                                 sector_mask(0), byte_mask_range(0, 4));
@@ -1112,6 +1231,7 @@ TEST(write_miss_events_and_writeback)
     simple_mem_interface full_mem(64);
     l1_cache full_lazy("LazyFull", lazy_cfg, 0, 0, &full_mem, &allocator,
                        IN_L1D_MISS_QUEUE, &gpu, L1_GPU_CACHE);
+    baseline_final_check_guard final_full_lazy(full_lazy, full_mem);
     mem_fetch *full = new_mf(0x4000, SECTOR_SIZE, true, GLOBAL_ACC_W, 1,
                              sector_mask(0), byte_mask_range(0, SECTOR_SIZE));
     events.clear();
@@ -1132,6 +1252,7 @@ TEST(sector_dirty_masks_and_writeback)
     cache_config cfg = make_config("S:1:128:1,L:B:m:F:L,A:8:4,16");
     l1_cache cache("SectorDirty", cfg, 0, 0, &mem, &allocator,
                    IN_L1D_MISS_QUEUE, &gpu, L1_GPU_CACHE);
+    baseline_final_check_guard final_cache(cache, mem);
     std::list<cache_event> events;
 
     mem_fetch *write_s0 = new_mf(0x0000, SECTOR_SIZE, true, GLOBAL_ACC_W, 1,
@@ -1165,6 +1286,7 @@ TEST(sector_assoc_pending_read_fill)
     cache_config cfg = make_config("S:4:128:4,L:B:m:N:L,S:4:2,8");
     l1_cache cache("SectorAssocPending", cfg, 0, 0, &mem, &allocator,
                    IN_L1D_MISS_QUEUE, &gpu, L1_GPU_CACHE);
+    baseline_final_check_guard final_cache(cache, mem);
     std::list<cache_event> events;
     mem_fetch *read = new_mf(0x6008, 4, false, GLOBAL_ACC_R, 1,
                              sector_mask(0), byte_mask_range(8, 4));
@@ -1212,6 +1334,7 @@ TEST(texture_pipeline_and_backpressure)
     cache_config cfg = make_config("N:4:128:4,L:R:m:N:L,F:4:2,4:2");
     tex_cache cache("Tex", cfg, 0, 0, &mem, IN_L1T_MISS_QUEUE,
                     IN_SHADER_L1T_ROB);
+    texture_final_check_guard final_cache(cache, mem);
     std::list<cache_event> events;
     mem_fetch *r = new_mf(0x1000, 4, false, TEXTURE_ACC_R);
     CHECK_EQ(cache.access(r->get_addr(), r, 1, events), MISS);
@@ -1236,16 +1359,19 @@ TEST(texture_pipeline_and_backpressure)
     cache_config tiny = make_config("N:4:128:4,L:R:m:N:L,F:1:1,1:1");
     tex_cache bp("TexBP", tiny, 0, 0, &bp_mem, IN_L1T_MISS_QUEUE,
                  IN_SHADER_L1T_ROB);
+    texture_final_check_guard final_bp(bp, bp_mem);
     mem_fetch *first = new_mf(0x2000, 4, false, TEXTURE_ACC_R);
     mem_fetch *second = new_mf(0x2080, 4, false, TEXTURE_ACC_R);
     events.clear();
     CHECK_EQ(bp.access(first->get_addr(), first, 1, events), MISS);
     CHECK_EQ(bp.access(second->get_addr(), second, 2, events), RESERVATION_FAIL);
+    bp_mem.max_queue_size = 64;
 
     simple_mem_interface rf_mem(64);
     cache_config rf_cfg = make_config("N:4:128:4,L:R:m:N:L,F:4:4,4:1");
     tex_cache rf("TexResultFIFO", rf_cfg, 0, 0, &rf_mem, IN_L1T_MISS_QUEUE,
                  IN_SHADER_L1T_ROB);
+    texture_final_check_guard final_rf(rf, rf_mem);
     events.clear();
     mem_fetch *miss = new_mf(0x3000, 4, false, TEXTURE_ACC_R);
     CHECK_EQ(rf.access(miss->get_addr(), miss, 1, events), MISS);
@@ -1275,6 +1401,7 @@ TEST(texture_sector_pending_and_return_order)
     cache_config sector_cfg = make_config("S:4:128:4,L:R:m:N:L,T:4:2,4:2");
     tex_cache sector_cache("TexSector", sector_cfg, 0, 0, &sector_mem,
                            IN_L1T_MISS_QUEUE, IN_SHADER_L1T_ROB);
+    texture_final_check_guard final_sector_cache(sector_cache, sector_mem);
     std::list<cache_event> events;
     mem_fetch *sector_req = new_mf(0x4000, 4, false, TEXTURE_ACC_R, 1);
     CHECK_EQ(sector_cache.access(sector_req->get_addr(), sector_req, 1, events),
@@ -1310,6 +1437,7 @@ TEST(texture_sector_pending_and_return_order)
     cache_config order_cfg = make_config("N:8:128:4,L:R:m:N:L,F:4:4,4:4");
     tex_cache order_cache("TexOrder", order_cfg, 0, 0, &order_mem,
                           IN_L1T_MISS_QUEUE, IN_SHADER_L1T_ROB);
+    texture_final_check_guard final_order_cache(order_cache, order_mem);
     events.clear();
     mem_fetch *first = new_mf(0x5000, 4, false, TEXTURE_ACC_R, 10);
     mem_fetch *second = new_mf(0x5080, 4, false, TEXTURE_ACC_R, 11);
@@ -1386,6 +1514,7 @@ TEST(stats_datastore_property_trace)
     cache_config cfg = make_config("N:16:64:4,L:R:m:N:L,A:16:4,32");
     read_only_cache cache("Prop", cfg, 0, 0, &mem, IN_L1C_MISS_QUEUE,
                           OTHER_GPU_CACHE, &gpu);
+    baseline_final_check_guard final_cache(cache, mem);
     std::mt19937 rng(0xCACE2026);
     unsigned accepted = 0;
     for (unsigned i = 0; i < 256; ++i) {
@@ -1423,6 +1552,7 @@ static property_result run_read_only_seed(unsigned seed, unsigned iterations)
     cache_config cfg = make_config("N:64:64:4,L:R:m:N:L,A:64:8,128");
     read_only_cache cache("SeedProp", cfg, 0, 0, &mem, IN_L1C_MISS_QUEUE,
                           OTHER_GPU_CACHE, &gpu);
+    baseline_final_check_guard final_cache(cache, mem);
     std::mt19937 rng(seed);
     unsigned accepted = 0;
     for (unsigned i = 0; i < iterations; ++i) {
@@ -1472,6 +1602,7 @@ static mixed_property_result run_mixed_seed(unsigned seed, unsigned iterations)
     cache_config cfg = make_config("N:128:64:4,L:B:m:N:L,A:128:8,256");
     l1_cache cache("MixedProp", cfg, 0, 0, &mem, &allocator,
                    IN_L1D_MISS_QUEUE, &gpu, L1_GPU_CACHE);
+    baseline_final_check_guard final_cache(cache, mem);
     std::mt19937 rng(seed);
     bool resident[64] = {};
     unsigned expected_accesses = 0;
@@ -1549,6 +1680,7 @@ TEST(port_timing_visibility)
     cache_config cfg = make_config("N:4:64:2,L:B:m:F:L,A:4:2,16:1,8");
     l1_cache cache("Ports", cfg, 0, 0, &mem, &allocator, IN_L1D_MISS_QUEUE,
                    &gpu, L1_GPU_CACHE);
+    baseline_final_check_guard final_cache(cache, mem);
     CHECK_TRUE(cache.data_port_free());
     CHECK_TRUE(cache.fill_port_free());
 
@@ -1587,6 +1719,7 @@ TEST(hitlat_explicit_old_mode_compatibility)
     cfg.set_defer_hit_response(false);
     read_only_cache cache("HitLatCompat", cfg, 0, 0, &mem, IN_L1C_MISS_QUEUE,
                           OTHER_GPU_CACHE, &gpu);
+    baseline_final_check_guard final_cache(cache, mem);
     fill_read_only_line(cache, mem, 0x1000, 1);
 
     std::list<cache_event> events;
@@ -1605,6 +1738,7 @@ TEST(hitlat_read_only_deferred_ready_latency)
     cfg.set_hit_response_queue_size(4);
     read_only_cache cache("HitLatRO", cfg, 0, 0, &mem, IN_L1C_MISS_QUEUE,
                           OTHER_GPU_CACHE, &gpu);
+    baseline_final_check_guard final_cache(cache, mem);
     fill_read_only_line(cache, mem, 0x1000, 1);
 
     std::list<cache_event> events;
@@ -1629,6 +1763,7 @@ TEST(hitlat_data_read_and_write_deferred_ready)
     cfg.set_hit_response_queue_size(4);
     l1_cache cache("HitLatData", cfg, 0, 0, &mem, &allocator,
                    IN_L1D_MISS_QUEUE, &gpu, L1_GPU_CACHE);
+    baseline_final_check_guard final_cache(cache, mem);
 
     std::list<cache_event> events;
     mem_fetch *warm = new_mf(0x2000, 4, false, GLOBAL_ACC_R, 1);
@@ -1660,6 +1795,7 @@ TEST(hitlat_data_read_and_write_deferred_ready)
     wt_cfg.set_hit_response_queue_size(4);
     l1_cache wt_cache("HitLatWT", wt_cfg, 0, 0, &wt_mem, &allocator,
                       IN_L1D_MISS_QUEUE, &gpu, L1_GPU_CACHE);
+    baseline_final_check_guard final_wt_cache(wt_cache, wt_mem);
     events.clear();
     mem_fetch *wt_warm = new_mf(0x2400, 4, false, GLOBAL_ACC_R, 8);
     CHECK_EQ(wt_cache.access(wt_warm->get_addr(), wt_warm, 8, events), MISS);
@@ -1682,6 +1818,7 @@ TEST(hitlat_same_cycle_hit_ready_precedes_miss_ready)
     cfg.set_hit_response_queue_size(4);
     read_only_cache cache("HitLatReadyOrder", cfg, 0, 0, &mem,
                           IN_L1C_MISS_QUEUE, OTHER_GPU_CACHE, &gpu);
+    baseline_final_check_guard final_cache(cache, mem);
     fill_read_only_line(cache, mem, 0x0000, 1);
 
     std::list<cache_event> events;
@@ -1714,6 +1851,7 @@ TEST(hitlat_stats_port_and_exactly_once_trace)
     cfg.set_hit_response_queue_size(8);
     l1_cache cache("HitLatStats", cfg, 0, 0, &mem, &allocator,
                    IN_L1D_MISS_QUEUE, &gpu, L1_GPU_CACHE);
+    baseline_final_check_guard final_cache(cache, mem);
 
     std::vector<mem_fetch *> accepted;
     std::vector<mem_fetch *> returned;
@@ -1758,6 +1896,7 @@ TEST(hitlat_queue_backpressure_and_recovery)
     cfg.set_hit_response_queue_size(1);
     read_only_cache cache("HitLatQueue", cfg, 0, 0, &mem, IN_L1C_MISS_QUEUE,
                           OTHER_GPU_CACHE, &gpu);
+    baseline_final_check_guard final_cache(cache, mem);
     fill_read_only_line(cache, mem, 0x3000, 1);
 
     std::list<cache_event> events;
@@ -1786,6 +1925,7 @@ TEST(hitlat_pending_hit_pins_line_until_next_access)
     cfg.set_hit_response_queue_size(4);
     read_only_cache cache("HitLatPin", cfg, 0, 0, &mem, IN_L1C_MISS_QUEUE,
                           OTHER_GPU_CACHE, &gpu);
+    baseline_final_check_guard final_cache(cache, mem);
     fill_read_only_line(cache, mem, 0x0000, 1);
 
     std::list<cache_event> events;
@@ -1815,6 +1955,7 @@ TEST(hitlat_multiple_hits_refcount_decrements_one_by_one)
     cfg.set_hit_response_queue_size(4);
     read_only_cache cache("HitLatMultiPin", cfg, 0, 0, &mem,
                           IN_L1C_MISS_QUEUE, OTHER_GPU_CACHE, &gpu);
+    baseline_final_check_guard final_cache(cache, mem);
     fill_read_only_line(cache, mem, 0x0000, 1);
 
     std::list<cache_event> events;
@@ -1848,6 +1989,7 @@ TEST(hitlat_mshr_merge_pins_each_ready_response)
     cfg.set_hit_response_queue_size(4);
     read_only_cache cache("HitLatMshrPin", cfg, 0, 0, &mem,
                           IN_L1C_MISS_QUEUE, OTHER_GPU_CACHE, &gpu);
+    baseline_final_check_guard final_cache(cache, mem);
     std::list<cache_event> events;
 
     mem_fetch *first = new_mf(0x0000, 4, false, GLOBAL_ACC_R, 1);
@@ -1885,6 +2027,7 @@ TEST(hitlat_sector_line_level_pin)
     cfg.set_hit_response_queue_size(4);
     l1_cache cache("HitLatSectorPin", cfg, 0, 0, &mem, &allocator,
                    IN_L1D_MISS_QUEUE, &gpu, L1_GPU_CACHE);
+    baseline_final_check_guard final_cache(cache, mem);
     std::list<cache_event> events;
 
     mem_fetch *warm = new_mf(0x0000, 4, false, GLOBAL_ACC_R, 1,
@@ -1914,6 +2057,7 @@ TEST(hitlat_write_evict_invalid_line_stays_pinned)
     cfg.set_hit_response_queue_size(4);
     l1_cache cache("HitLatWriteEvictPin", cfg, 0, 0, &mem, &allocator,
                    IN_L1D_MISS_QUEUE, &gpu, L1_GPU_CACHE);
+    baseline_final_check_guard final_cache(cache, mem);
     std::list<cache_event> events;
 
     mem_fetch *warm = new_mf(0x0000, 4, false, GLOBAL_ACC_R, 1);
@@ -1953,6 +2097,7 @@ TEST(hitlat_datastore_timing_token_only)
     cfg.set_hit_response_queue_size(4);
     read_only_cache cache("HitLatDataStore", cfg, 0, 0, &mem,
                           IN_L1C_MISS_QUEUE, OTHER_GPU_CACHE, &gpu);
+    baseline_final_check_guard final_cache(cache, mem);
     fill_read_only_line(cache, mem, 0x1000, 1);
 
     std::list<cache_event> events;
@@ -1975,6 +2120,7 @@ TEST(final_check_baseline_cache_returns_to_initial_state)
     cache_config cfg = make_config("N:4:64:2,L:R:m:N:L,A:4:2,16:1,8");
     read_only_cache cache("FinalBaseline", cfg, 0, 0, &mem, IN_L1C_MISS_QUEUE,
                           OTHER_GPU_CACHE, &gpu);
+    baseline_final_check_guard final_cache(cache, mem);
 
     fill_read_only_line(cache, mem, 0x1000, 1);
     CHECK_FALSE(cache.final_state_clean());
@@ -1991,6 +2137,7 @@ TEST(final_check_texture_cache_returns_to_initial_state)
     cache_config cfg = make_config("N:4:128:4,L:R:m:N:L,F:4:2,4:2");
     tex_cache cache("FinalTexture", cfg, 0, 0, &mem, IN_L1C_MISS_QUEUE,
                     IN_SHADER_FETCHED);
+    texture_final_check_guard final_cache(cache, mem);
 
     std::list<cache_event> events;
     mem_fetch *miss = new_mf(0x2000, 16, false, TEXTURE_ACC_R, 1);
