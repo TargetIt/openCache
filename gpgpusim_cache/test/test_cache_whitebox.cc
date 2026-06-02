@@ -960,6 +960,14 @@ struct property_result {
     unsigned accepted;
 };
 
+struct mixed_property_result {
+    cache_sub_stats stats;
+    cache_sub_stats_pw stats_pw;
+    unsigned expected_accesses;
+    unsigned expected_misses;
+    bool ok;
+};
+
 static property_result run_read_only_seed(unsigned seed, unsigned iterations)
 {
     simple_mem_interface mem(2048);
@@ -1005,6 +1013,82 @@ TEST(multi_seed_differential_property_trace)
         CHECK_EQ(first.stats.res_fails, second.stats.res_fails);
         CHECK_TRUE(first.stats.accesses > 0);
         CHECK_TRUE(first.stats.misses > 0);
+    }
+}
+
+static mixed_property_result run_mixed_seed(unsigned seed, unsigned iterations)
+{
+    simple_mem_interface mem(4096);
+    simple_mf_allocator allocator;
+    gpgpu_sim gpu;
+    cache_config cfg = make_config("N:128:64:4,L:B:m:N:L,A:128:8,256");
+    l1_cache cache("MixedProp", cfg, 0, 0, &mem, &allocator,
+                   IN_L1D_MISS_QUEUE, &gpu, L1_GPU_CACHE);
+    std::mt19937 rng(seed);
+    bool resident[64] = {};
+    unsigned expected_accesses = 0;
+    unsigned expected_misses = 0;
+    bool ok = true;
+
+    for (unsigned i = 0; i < iterations; ++i) {
+        unsigned line = rng() % 64;
+        unsigned byte = (rng() % 16) * 4;
+        new_addr_type addr = line * 64ull + byte;
+        bool wr = resident[line] && ((rng() & 1u) != 0);
+        mem_access_type type = wr ? GLOBAL_ACC_W : GLOBAL_ACC_R;
+        mem_fetch *mf = new_mf(addr, 4, wr, type, i,
+                               sector_mask(byte / SECTOR_SIZE),
+                               byte_mask_range(byte, 4));
+        std::list<cache_event> events;
+        cache_request_status status = cache.access(mf->get_addr(), mf, i, events);
+        expected_accesses++;
+        if (resident[line]) {
+            ok = ok && (status == HIT);
+        } else {
+            ok = ok && !wr;
+            ok = ok && (status == MISS);
+            ok = ok && has_event(events, READ_REQUEST_SENT);
+            expected_misses++;
+            resident[line] = true;
+            drain_one_level(cache, mem, i + 1);
+        }
+    }
+
+    cache_sub_stats stats;
+    cache_sub_stats_pw stats_pw;
+    cache.get_sub_stats(stats);
+    cache.get_sub_stats_pw(stats_pw);
+    mixed_property_result result;
+    result.stats = stats;
+    result.stats_pw = stats_pw;
+    result.expected_accesses = expected_accesses;
+    result.expected_misses = expected_misses;
+    result.ok = ok;
+    return result;
+}
+
+TEST(mixed_read_write_differential_property_trace)
+{
+    const unsigned seeds[] = {0xFACE0001u, 0xFACE0002u, 0xFACE0003u,
+                              0xFACE0004u};
+    for (unsigned seed : seeds) {
+        mixed_property_result first = run_mixed_seed(seed, 1024);
+        mixed_property_result second = run_mixed_seed(seed, 1024);
+        CHECK_TRUE(first.ok);
+        CHECK_TRUE(second.ok);
+        CHECK_EQ(first.stats.accesses,
+                 (unsigned long long)first.expected_accesses);
+        CHECK_EQ(first.stats.misses,
+                 (unsigned long long)first.expected_misses);
+        CHECK_EQ(first.stats.res_fails, 0ull);
+        CHECK_TRUE(first.expected_misses > 0);
+        CHECK_TRUE(first.stats_pw.write_hits > 0);
+        CHECK_TRUE(first.stats_pw.read_hits > 0);
+        CHECK_EQ(first.stats.accesses, second.stats.accesses);
+        CHECK_EQ(first.stats.misses, second.stats.misses);
+        CHECK_EQ(first.stats_pw.write_hits, second.stats_pw.write_hits);
+        CHECK_EQ(first.stats_pw.read_hits, second.stats_pw.read_hits);
+        CHECK_EQ(first.stats.res_fails, second.stats.res_fails);
     }
 }
 
@@ -1067,6 +1151,7 @@ int main()
     RUN_TEST(texture_sector_pending_and_return_order);
     RUN_TEST(stats_datastore_property_trace);
     RUN_TEST(multi_seed_differential_property_trace);
+    RUN_TEST(mixed_read_write_differential_property_trace);
     RUN_TEST(port_timing_visibility);
 
     printf("\n========== Results: %d/%d tests passed ==========\n",
