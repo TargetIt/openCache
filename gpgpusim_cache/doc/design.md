@@ -75,6 +75,8 @@ miss 路径中，fill 前由 `RESERVED` 保护；fill 后如果 response 尚未�
 
 `tag_array::probe()` 选择 victim 时必须跳过 pinned line。
 
+重要约束：victim 选择必须先判断 `refcount == 0`，再考虑 `INVALID`、`VALID`、`MODIFIED` 等状态。即使某条 line 已被标为 `INVALID`，只要 refcount 不为 0，也不能被复用。
+
 新的 candidate 条件：
 
 ```text
@@ -168,11 +170,63 @@ return entry.mf
 |------|------------------|
 | replacement victim | 禁止选择 |
 | conflict miss 分配 | 如果候选都 pinned，返回 `RESERVATION_FAIL` |
-| write-evict hit | 该请求自身进入 response queue 后，line 状态可按策略 invalidate，但必须确保 pending response 使用的 token 不再依赖 line 数据 |
+| write-evict hit | 该请求自身进入 response queue 后，line 状态可按策略 invalidate，但 refcount 检查必须优先于 `INVALID` victim 选择 |
 | explicit `invalidate()` | 作为强制管理操作允许执行，但测试需确认不会破坏 pending token exactly-once 返回 |
 | explicit `flush()` | dirty 写回语义保持；pinned line 不应被普通 replacement 清掉 |
 
 如果后续要求更严格，可以规定 explicit invalidate/flush 对 pinned line 返回失败或延迟执行；这需要新增接口，第一阶段不建议。
+
+write-evict hit 有两种可选实现：
+
+| 方案 | 说明 | 取舍 |
+|------|------|------|
+| 立即 invalidate，但保持 pin | write-evict hit 立即将 line 置为 `INVALID`，但 replacement 必须先检查 refcount，pinned invalid line 不可复用 | 保持 write-evict 可观测语义，要求 victim 选择严格 |
+| 延迟 invalidate 到 `next_access()` | write-evict hit token 被读走后再 invalidate | 生命周期更直观，但改变 invalidate 可观测时刻 |
+
+推荐第一阶段采用“立即 invalidate，但保持 pin”。该方案要求测试覆盖 pinned invalid line 不可作为 victim。
+
+### Hit Response Queue 容量
+
+hit response queue 不建议长期无界。
+
+无界队列虽然降低第一版实现复杂度，但会掩盖真实背压。如果上层长时间不调用 `next_access()`，accepted hit 会无限堆积，既不符合 GPU cache 时序模型，也可能造成仿真器内存增长。
+
+推荐第一阶段即引入有限容量：
+
+```cpp
+unsigned m_hit_response_queue_size;
+```
+
+容量满时：
+
+1. 新 hit 返回 `RESERVATION_FAIL`。
+2. fail reason 优先使用新增 `HIT_RESPONSE_QUEUE_FULL`。
+3. 如果不新增 fail reason，必须在实现说明中明确复用哪个现有 fail reason，并补测试。
+
+如果为了降低第一版风险临时使用无界队列，必须把 bounded queue 作为遗留问题保留，且不能关闭 `TC-HITLAT-011` 的 Planned 状态。
+
+### DataStore 快照语义
+
+第一阶段只改变 timing token 的完成时机，不改变 payload 读取语义。
+
+如果后续实现引入真实数据 payload，需要显式规定读快照时机。推荐语义是：tag hit 被接受时读取 SRAM/DataStore 快照，token 在后续 cycle 交付；即使延迟期间其他写入更新同地址，该已经在 pipeline 中的读请求仍返回旧快照。
+
+该语义符合硬件流水线直觉：
+
+```text
+cycle N:   hit 被接受，SRAM 读启动并捕获数据快照
+cycle N+k: token 通过 next_access() 返回
+```
+
+这不是 cache coherence 模型；如果后续要验证跨核写入可见性，需要单独建立一致性需求和 testcase。
+
+### 评审风险与处理策略
+
+| 风险 | 合理性 | 处理策略 |
+|------|--------|----------|
+| write-evict hit 后 line 立即 invalid，但 pending response 尚未返回 | 合理，高优先级 | replacement 必须先检查 refcount；pinned invalid line 不可复用；新增测试覆盖 |
+| 无界 hit response queue 掩盖背压 | 合理，中高优先级 | 第一阶段建议有限容量；容量满返回 `RESERVATION_FAIL`；新增 backpressure 测试 |
+| DataStore 快照与延迟返回存在可见性时差 | 合理，但非阻塞 | 第一阶段只处理 timing token；未来 payload 语义采用“读出即快照”并单独测试 |
 
 ### 统计与诊断
 
