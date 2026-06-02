@@ -40,6 +40,15 @@
 | F-RO-001 | read_only miss/hit flow | 用户场景 | access/cycle/fill/ready | TC-RO-001 |
 | F-RO-002 | read_only miss queue full | 异常 | MISS_QUEUE_FULL fail stats | TC-RO-002 |
 | F-DC-001 | data_cache read miss/hit | 用户场景 | read miss event、fill、hit | TC-DC-001 |
+| F-HITLAT-001 | hit response 配置开关 | 接口/兼容性 | 默认旧行为；开启后 hit 延迟返回 | TC-HITLAT-001 |
+| F-HITLAT-002 | read-only hit 延迟返回 | 接口/性能模型 | read-only hit 进入 ready queue，按 data port latency 返回 | TC-HITLAT-002 |
+| F-HITLAT-003 | data read hit 延迟返回 | 接口/性能模型 | data/l1/l2 read hit 返回 HIT 但数据经 next_access 返回 | TC-HITLAT-003, TC-HITLAT-009 |
+| F-HITLAT-004 | data write hit 延迟返回 | 接口/性能模型 | WB/WT/WE/local-global 写 hit 的完成点和 ready 行为 | TC-HITLAT-004, TC-HITLAT-005 |
+| F-HITLAT-005 | hit/miss ready 顺序 | 白盒/序列 | hit response 与 miss fill 同周期 ready 的顺序规则 | TC-HITLAT-006, TC-HITLAT-009 |
+| F-HITLAT-006 | 统计和端口一致性 | 统计/性能 | data port busy、hit/miss stats、ready 返回数量一致 | TC-HITLAT-007, TC-HITLAT-010 |
+| F-HITLAT-007 | texture cache 兼容 | 回归 | texture hit-reserved/result FIFO 行为不回退 | TC-HITLAT-008 |
+| F-HITLAT-008 | hit response backpressure | 异常 | hit response queue 满时的返回状态和 fail reason | TC-HITLAT-011 |
+| F-HITLAT-009 | DataStore 可见性 | functional | 本阶段不改变 payload 读取，只验证 timing token ready | TC-HITLAT-012 |
 | F-WR-001 | write-back hit | 白盒 | dirty no lower write | TC-WR-001 |
 | F-WR-002 | write-through hit | 白盒 | WRITE_REQUEST_SENT | TC-WR-002 |
 | F-WR-003 | write-evict hit | 白盒 | write event + invalidation | TC-WR-003 |

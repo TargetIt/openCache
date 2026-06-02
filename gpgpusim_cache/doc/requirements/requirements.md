@@ -84,6 +84,35 @@
 
 2026-06-02
 
+## REQ-20260602-003 gpgpusim_cache hit response 延迟返回
+
+### 原始来源
+
+用户提出当前 data/read-only cache 在 hit 后 `access()` 直接完成数据返回，不符合 SRAM/data array 读访问仍需时间的性能模型。需求是将 hit/miss 判定与最终数据返回解耦，使 hit 也能像 miss fill 一样通过 `access_ready()` / `next_access()` 延迟返回。
+
+### 拆解需求
+
+| 子需求 | 内容 | 状态 |
+|--------|------|------|
+| GPGPUSIM-HITLAT-001 | 编写 hit response 延迟返回策略方案，明确接口语义、兼容开关、ready 队列和风险 | 已完成 |
+| GPGPUSIM-HITLAT-002 | 编写 hit response 延迟返回测试方案，覆盖 read-only/data/read hit/write hit/ready 顺序/统计/backpressure | 已完成 |
+| GPGPUSIM-HITLAT-003 | 完成项目经理、设计、验证、测试专家评审，并记录独立评审代理意见 | 已完成 |
+| GPGPUSIM-HITLAT-004 | 在 feature/testcase 文档中新增 planned 追踪项 | 已完成 |
+| GPGPUSIM-HITLAT-005 | 实现兼容开关、hit response queue 和统一 ready 返回语义 | 待开展 |
+| GPGPUSIM-HITLAT-006 | 实现 planned testcase 并刷新覆盖率与遗留问题 | 待开展 |
+
+### 验收标准
+
+1. `doc/verification/hit_response_strategy.md` 存在，并明确 `HIT` 不等于数据 ready 的新语义。
+2. `doc/verification/hit_response_test_plan.md` 存在，并列出 planned testcase。
+3. Feature/testcase 文档已建立 `F-HITLAT-*` 和 `TC-HITLAT-*` 追踪。
+4. 文档阶段不修改实现代码，不把 planned testcase 标记为 implemented。
+5. 提交前 `git diff --check` 通过。
+
+### 更新时间
+
+2026-06-02
+
 ## 新需求追加区
 
 后续 GPGPU-Sim 版本需求从这里继续追加。

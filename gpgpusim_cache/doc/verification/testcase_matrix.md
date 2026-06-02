@@ -36,6 +36,18 @@
 | TC-RO-001 | F-RO-001 | unit | Implemented | `test/test_cache_whitebox.cc` | read_only miss/cycle/fill/ready |
 | TC-RO-002 | F-RO-002 | unit | Implemented | `test/test_cache_whitebox.cc` | miss queue full backpressure，并精确查询 MISS_QUEUE_FULL |
 | TC-DC-001 | F-DC-001 | unit | Implemented | `test/test_cache_whitebox.cc` | data_cache read miss/hit |
+| TC-HITLAT-001 | F-HITLAT-001 | unit | Planned | `test/test_cache_whitebox.cc` | 默认不开启 hit 延迟时，既有 hit 行为和当前回归保持一致 |
+| TC-HITLAT-002 | F-HITLAT-002 | unit | Planned | `test/test_cache_whitebox.cc` | read-only cache hit 返回 `HIT`，同周期 `access_ready()==false`，延迟后 `next_access()` 返回原 mf |
+| TC-HITLAT-003 | F-HITLAT-003 | unit | Planned | `test/test_cache_whitebox.cc` | l1/data read hit 返回 `HIT`，按 `ceil(data_size/data_port_width)` cycle 后 ready |
+| TC-HITLAT-004 | F-HITLAT-004 | unit | Planned | `test/test_cache_whitebox.cc` | write-back hit 延迟返回，并保持 dirty/tag 更新正确 |
+| TC-HITLAT-005 | F-HITLAT-004 | unit | Planned | `test/test_cache_whitebox.cc` | write-through/write-evict hit 发出事件后，按定义进入 hit response ready |
+| TC-HITLAT-006 | F-HITLAT-005 | unit | Planned | `test/test_cache_whitebox.cc` | hit response 和 miss fill 同周期完成时，`next_access()` 顺序与策略文档一致 |
+| TC-HITLAT-007 | F-HITLAT-006 | unit | Planned | `test/test_cache_whitebox.cc` | data port busy cycles、hit stats、ready 返回数量一致，不重复计数 |
+| TC-HITLAT-008 | F-HITLAT-007 | regression | Planned | `test/test_cache_whitebox.cc` | texture cache 现有 `HIT_RESERVED -> result FIFO -> next_access()` 测试继续通过 |
+| TC-HITLAT-009 | F-HITLAT-003, F-HITLAT-005 | sequence | Planned | `test/test_cache_whitebox.cc` | 同一 line `MISS -> fill -> HIT accepted -> delayed ready -> HIT` 序列完整 |
+| TC-HITLAT-010 | F-HITLAT-002, F-HITLAT-003, F-HITLAT-006 | property | Planned | `test/test_cache_whitebox.cc` | 多 seed hit/miss trace 在新模式下 accepted、ready、stats 一致且 exactly-once 返回 |
+| TC-HITLAT-011 | F-HITLAT-008 | unit | Planned | `test/test_cache_whitebox.cc` | hit response queue 容量受限时返回 `RESERVATION_FAIL`，fail reason 与策略文档一致 |
+| TC-HITLAT-012 | F-HITLAT-009 | scenario | Planned | `test/test_scenario.cc` | DataStore 双模型场景继续通过，证明本阶段只改变 timing token 完成时机 |
 | TC-WR-001 | F-WR-001 | unit | Implemented | `test/test_cache_whitebox.cc` | WB hit 不产生 lower write |
 | TC-WR-002 | F-WR-002 | unit | Implemented | `test/test_cache_whitebox.cc` | WT hit 产生 WRITE_REQUEST_SENT |
 | TC-WR-003 | F-WR-003 | unit | Implemented | `test/test_cache_whitebox.cc` | WE hit 后读同地址 miss |
@@ -73,3 +85,4 @@
 | step2 testcase | 通过，覆盖架构风险点 | 通过，测试分层明确 | 通过，要求默认回归全部可执行 | 通过，要求 run.sh 和 coverage.sh 纳入交付 |
 | step3-step7 | 通过，新增白盒和 death 覆盖关键架构风险；参数矩阵和 sequence matrix 已纳入；覆盖率需后续继续提升 | 通过，run.sh/CMake/coverage.sh 均纳入 | 通过，默认回归 13+10+26+16 全通过 | 通过，文档和追踪矩阵已刷新 |
 | sequence matrix | 通过，补齐 same line/set/cache/sector/MSHR/texture 序列风险 | 通过，用例以显式状态序列驱动，不依赖随机统计 | 通过，新增 5 条白盒用例并反标 feature | 通过，默认回归 13+10+26+16 全通过，coverage 基线已刷新 |
+| hit response strategy | 通过，接口语义变化和受影响范围已列出 | 通过，推荐兼容开关和复用 access_ready/next_access | 通过，planned testcase 覆盖 read-only/data/write/顺序/统计/backpressure | 通过，文档阶段完成，不声称实现完成 |
