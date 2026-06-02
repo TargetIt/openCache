@@ -27,6 +27,11 @@
 | F-TAG-004 | fill 行为 | 白盒 | fill 后有效、ON_FILL fill allocate | TC-TAG-002, TC-TAG-006 |
 | F-TAG-005 | flush/invalidate | 接口 | flush 只 invalid modified 且保留 clean line；invalidate invalid all | TC-TAG-008 |
 | F-TAG-006 | new_window/windowed_miss_rate | 统计 | window snapshot | TC-STATS-003 |
+| F-SEQ-001 | same line hit/miss sequence | 白盒/序列 | cold miss -> ready hit -> consecutive hit；write-evict hit -> miss | TC-SEQ-001 |
+| F-SEQ-002 | same set/full cache eviction sequence | 白盒/序列 | cache 填满、同 set conflict miss、victim miss、非冲突 set 保持 hit | TC-SEQ-002 |
+| F-SEQ-003 | sector partial sequence | 白盒/序列 | sector partial valid、目标 sector 为 SECTOR_MISS、补齐后 hit、冲突后 miss | TC-SEQ-003 |
+| F-SEQ-004 | MSHR/pending sequence | 白盒/序列 | same line miss merge、只发一个下游请求、ready FIFO 顺序、merge 上限 backpressure | TC-SEQ-004 |
+| F-SEQ-005 | texture hit-reserved sequence | 白盒/序列 | texture miss fill 后 result FIFO pending；后续 hit 返回 HIT_RESERVED 并按 FIFO ready | TC-SEQ-005 |
 | F-MSHR-001 | MSHR add/probe/ready | 接口 | add、mark_ready、next_access | TC-MSHR-001 |
 | F-MSHR-002 | MSHR merge 上限 | 白盒 | full(block) true | TC-MSHR-002 |
 | F-MSHR-003 | MSHR entry 上限 | 白盒 | full(new block) true | TC-MSHR-003 |

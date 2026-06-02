@@ -55,6 +55,35 @@
 
 2026-06-02
 
+## REQ-20260602-002 gpgpusim_cache hit/miss 序列矩阵验证
+
+### 原始来源
+
+用户要求补齐 hit/miss 细分状态与序列 pattern 覆盖，包括同一 cache line、同一 set、整个 cache、sector partial、pending data、MSHR merge、连续 hit、连续 miss、hit 后 miss、miss 后 hit、容量/冲突驱逐等场景。
+
+### 拆解需求
+
+| 子需求 | 内容 | 状态 |
+|--------|------|------|
+| GPGPUSIM-SEQ-001 | 在 feature/testcase 文档中新增 hit/miss 序列矩阵，并反标到具体测试 | 已完成 |
+| GPGPUSIM-SEQ-002 | 覆盖同一 cache line 的 cold miss、ready hit、连续 hit、write-evict hit 后 miss | 已完成 |
+| GPGPUSIM-SEQ-003 | 覆盖同一 set 与整个 cache 填满后的 conflict/capacity eviction 序列 | 已完成 |
+| GPGPUSIM-SEQ-004 | 覆盖 sector partial valid、目标 sector miss、补齐后 hit 的序列 | 已完成 |
+| GPGPUSIM-SEQ-005 | 覆盖 MSHR merge miss、pending ready 顺序、merge 上限 backpressure | 已完成 |
+| GPGPUSIM-SEQ-006 | 覆盖 texture cache miss 后 hit-reserved，再按 result FIFO 顺序 ready | 已完成 |
+
+### 验收标准
+
+1. Feature/testcase 文档中有 hit/miss sequence matrix 条目。
+2. 每条 sequence testcase 映射到明确测试函数。
+3. 用例不能只统计 hit/miss 数，必须断言每一步状态、事件、ready 顺序或 eviction 后状态。
+4. 默认 `./run.sh` 执行新增 sequence 用例并通过。
+5. `./coverage.sh` 通过，覆盖率基线与遗留问题文档同步刷新。
+
+### 更新时间
+
+2026-06-02
+
 ## 新需求追加区
 
 后续 GPGPU-Sim 版本需求从这里继续追加。
@@ -80,7 +109,7 @@
 
 ### 验收标准
 
-1. `./run.sh` 通过：unit 13/13，scenario 86/86 checks，whitebox 21/21，death 16/16。
+1. `./run.sh` 通过：unit 13/13，scenario 86/86 checks，whitebox 26/26，death 16/16。
 2. `./coverage.sh` 通过并输出覆盖率摘要。
 3. Feature/testcase 文档中每条已实现 testcase 映射到测试文件。
 4. 覆盖率基线已记录，低覆盖区域作为后续迭代输入。
@@ -99,7 +128,7 @@
 | Region | 54.31% |
 | Function | 71.65% |
 | Line | 68.77% |
-| Branch | 58.90% |
+| Branch | 59.00% |
 
 ### 更新时间
 

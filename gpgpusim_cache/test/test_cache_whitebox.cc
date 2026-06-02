@@ -406,6 +406,195 @@ TEST(parameter_pairwise_smoke_matrix)
     }
 }
 
+TEST(sequence_same_line_hit_miss_matrix)
+{
+    simple_mem_interface mem(64);
+    simple_mf_allocator allocator;
+    gpgpu_sim gpu;
+    cache_config cfg = make_config("N:4:64:2,L:B:m:F:L,A:4:2,16");
+    l1_cache cache("SeqLine", cfg, 0, 0, &mem, &allocator,
+                   IN_L1D_MISS_QUEUE, &gpu, L1_GPU_CACHE);
+    std::list<cache_event> events;
+
+    mem_fetch *cold = new_mf(0x1000, 4, false, GLOBAL_ACC_R, 1);
+    CHECK_EQ(cache.access(cold->get_addr(), cold, 1, events), MISS);
+    CHECK_TRUE(has_event(events, READ_REQUEST_SENT));
+    drain_one_level(cache, mem, 2);
+
+    events.clear();
+    mem_fetch *hit0 = new_mf(0x1000, 4, false, GLOBAL_ACC_R, 3);
+    CHECK_EQ(cache.access(hit0->get_addr(), hit0, 3, events), HIT);
+    CHECK_FALSE(has_event(events, READ_REQUEST_SENT));
+
+    events.clear();
+    mem_fetch *hit1 = new_mf(0x1010, 4, false, GLOBAL_ACC_R, 4);
+    CHECK_EQ(cache.access(hit1->get_addr(), hit1, 4, events), HIT);
+    CHECK_FALSE(has_event(events, READ_REQUEST_SENT));
+
+    simple_mem_interface we_mem(64);
+    cache_config we_cfg = make_config("N:4:64:2,L:E:m:N:L,A:4:2,16");
+    l1_cache we("SeqWriteEvict", we_cfg, 0, 0, &we_mem, &allocator,
+                IN_L1D_MISS_QUEUE, &gpu, L1_GPU_CACHE);
+    events.clear();
+    mem_fetch *warm = new_mf(0x2000, 4, false, GLOBAL_ACC_R, 1);
+    CHECK_EQ(we.access(warm->get_addr(), warm, 1, events), MISS);
+    drain_one_level(we, we_mem, 2);
+
+    events.clear();
+    mem_fetch *evicting_write = new_mf(0x2000, 4, true, GLOBAL_ACC_W, 3);
+    CHECK_EQ(we.access(evicting_write->get_addr(), evicting_write, 3, events),
+             HIT);
+    CHECK_TRUE(has_event(events, WRITE_REQUEST_SENT));
+
+    events.clear();
+    mem_fetch *after_evict = new_mf(0x2000, 4, false, GLOBAL_ACC_R, 4);
+    CHECK_EQ(we.access(after_evict->get_addr(), after_evict, 4, events), MISS);
+    CHECK_TRUE(has_event(events, READ_REQUEST_SENT));
+}
+
+TEST(sequence_same_set_and_full_cache_eviction)
+{
+    simple_mem_interface mem(64);
+    simple_mf_allocator allocator;
+    gpgpu_sim gpu;
+    cache_config cfg = make_config("N:2:64:1,L:B:m:F:L,A:4:2,16");
+    l1_cache cache("SeqFullCache", cfg, 0, 0, &mem, &allocator,
+                   IN_L1D_MISS_QUEUE, &gpu, L1_GPU_CACHE);
+    std::list<cache_event> events;
+
+    mem_fetch *set0 = new_mf(0x0000, 4, false, GLOBAL_ACC_R, 1);
+    CHECK_EQ(cache.access(set0->get_addr(), set0, 1, events), MISS);
+    drain_one_level(cache, mem, 2);
+    events.clear();
+    mem_fetch *set1 = new_mf(0x0040, 4, false, GLOBAL_ACC_R, 3);
+    CHECK_EQ(cache.access(set1->get_addr(), set1, 3, events), MISS);
+    drain_one_level(cache, mem, 4);
+
+    events.clear();
+    mem_fetch *hit_set0 = new_mf(0x0004, 4, false, GLOBAL_ACC_R, 5);
+    CHECK_EQ(cache.access(hit_set0->get_addr(), hit_set0, 5, events), HIT);
+    events.clear();
+    mem_fetch *hit_set1 = new_mf(0x0044, 4, false, GLOBAL_ACC_R, 6);
+    CHECK_EQ(cache.access(hit_set1->get_addr(), hit_set1, 6, events), HIT);
+
+    events.clear();
+    mem_fetch *conflict_set0 = new_mf(0x0080, 4, false, GLOBAL_ACC_R, 7);
+    CHECK_EQ(cache.access(conflict_set0->get_addr(), conflict_set0, 7, events),
+             MISS);
+    CHECK_TRUE(has_event(events, READ_REQUEST_SENT));
+    drain_one_level(cache, mem, 8);
+
+    events.clear();
+    mem_fetch *old_set0 = new_mf(0x0000, 4, false, GLOBAL_ACC_R, 9);
+    CHECK_EQ(cache.access(old_set0->get_addr(), old_set0, 9, events), MISS);
+    events.clear();
+    mem_fetch *still_set1 = new_mf(0x0040, 4, false, GLOBAL_ACC_R, 10);
+    CHECK_EQ(cache.access(still_set1->get_addr(), still_set1, 10, events), HIT);
+}
+
+TEST(sequence_sector_partial_hit_miss_matrix)
+{
+    cache_config cfg = make_config("S:1:128:1,L:B:m:F:L,A:4:2,16");
+    tag_array tags(cfg, 0, 0);
+    unsigned idx = 0;
+    mem_fetch *sec0 = new_mf(0x3000, SECTOR_SIZE, false, GLOBAL_ACC_R, 1,
+                             sector_mask(0),
+                             byte_mask_range(0, SECTOR_SIZE));
+    CHECK_EQ(tags.access(0x3000, 1, idx, sec0), MISS);
+    tags.fill(idx, 2, sec0);
+    CHECK_EQ(tags.probe(0x3004, idx, sec0, false), HIT);
+
+    mem_fetch *sec1 = new_mf(0x3020, 4, false, GLOBAL_ACC_R, 3,
+                             sector_mask(1), byte_mask_range(32, 4));
+    CHECK_EQ(tags.probe(0x3020, idx, sec1, false), SECTOR_MISS);
+    CHECK_EQ(tags.access(0x3020, 3, idx, sec1), SECTOR_MISS);
+    tags.fill(idx, 4, sec1);
+    CHECK_EQ(tags.probe(0x3020, idx, sec1, false), HIT);
+
+    mem_fetch *conflict = new_mf(0x3080, SECTOR_SIZE, false, GLOBAL_ACC_R, 5,
+                                 sector_mask(0),
+                                 byte_mask_range(0, SECTOR_SIZE));
+    CHECK_EQ(tags.access(0x3080, 5, idx, conflict), MISS);
+    tags.fill(idx, 6, conflict);
+    CHECK_EQ(tags.probe(0x3000, idx, sec0, false), MISS);
+}
+
+TEST(sequence_mshr_merge_and_pending_matrix)
+{
+    simple_mem_interface mem(64);
+    gpgpu_sim gpu;
+    cache_config cfg = make_config("N:4:64:2,L:R:m:N:L,A:4:2,16");
+    read_only_cache cache("SeqMshrMerge", cfg, 0, 0, &mem, IN_L1C_MISS_QUEUE,
+                          OTHER_GPU_CACHE, &gpu);
+    std::list<cache_event> events;
+
+    mem_fetch *first = new_mf(0x4000, 4, false, GLOBAL_ACC_R, 1);
+    CHECK_EQ(cache.access(first->get_addr(), first, 1, events), MISS);
+    CHECK_TRUE(has_event(events, READ_REQUEST_SENT));
+    events.clear();
+    mem_fetch *merged = new_mf(0x4010, 4, false, GLOBAL_ACC_R, 2);
+    CHECK_EQ(cache.access(merged->get_addr(), merged, 2, events), MISS);
+    CHECK_FALSE(has_event(events, READ_REQUEST_SENT));
+
+    cache.cycle();
+    CHECK_EQ(mem.queue.size(), 1u);
+    mem_fetch *resp = mem.queue.front();
+    mem.queue.pop_front();
+    cache.fill(resp, 3);
+    CHECK_TRUE(cache.access_ready());
+    CHECK_TRUE(cache.next_access() == first);
+    CHECK_TRUE(cache.access_ready());
+    CHECK_TRUE(cache.next_access() == merged);
+    CHECK_FALSE(cache.access_ready());
+
+    simple_mem_interface fail_mem(64);
+    cache_config fail_cfg = make_config("N:4:64:4,L:R:m:N:L,A:4:1,16");
+    read_only_cache fail_cache("SeqMshrMergeFail", fail_cfg, 0, 0, &fail_mem,
+                               IN_L1C_MISS_QUEUE, OTHER_GPU_CACHE, &gpu);
+    events.clear();
+    mem_fetch *base = new_mf(0x5000, 4, false, GLOBAL_ACC_R, 1);
+    CHECK_EQ(fail_cache.access(base->get_addr(), base, 1, events), MISS);
+    events.clear();
+    mem_fetch *merge_fail = new_mf(0x5004, 4, false, GLOBAL_ACC_R, 2);
+    CHECK_EQ(fail_cache.access(merge_fail->get_addr(), merge_fail, 2, events),
+             RESERVATION_FAIL);
+    CHECK_EQ(fail_cache.get_fail_stats(GLOBAL_ACC_R, MSHR_MERGE_ENRTY_FAIL),
+             1ull);
+}
+
+TEST(sequence_texture_hit_reserved_order_matrix)
+{
+    simple_mem_interface mem(64);
+    cache_config cfg = make_config("N:4:128:4,L:R:m:N:L,F:4:4,4:1");
+    tex_cache cache("SeqTex", cfg, 0, 0, &mem, IN_L1T_MISS_QUEUE,
+                    IN_SHADER_L1T_ROB);
+    std::list<cache_event> events;
+
+    mem_fetch *miss = new_mf(0x6000, 4, false, TEXTURE_ACC_R, 1);
+    CHECK_EQ(cache.access(miss->get_addr(), miss, 1, events), MISS);
+    CHECK_TRUE(has_event(events, READ_REQUEST_SENT));
+    cache.cycle();
+    CHECK_EQ(mem.queue.size(), 1u);
+    mem_fetch *resp = mem.queue.front();
+    mem.queue.pop_front();
+    cache.fill(resp, 2);
+    cache.cycle();
+    CHECK_TRUE(cache.access_ready());
+
+    events.clear();
+    mem_fetch *hit_reserved = new_mf(0x6004, 4, false, TEXTURE_ACC_R, 3);
+    CHECK_EQ(cache.access(hit_reserved->get_addr(), hit_reserved, 3, events),
+             HIT_RESERVED);
+    CHECK_FALSE(has_event(events, READ_REQUEST_SENT));
+
+    CHECK_TRUE(cache.access_ready());
+    CHECK_TRUE(cache.next_access() == miss);
+    CHECK_FALSE(cache.access_ready());
+    cache.cycle();
+    CHECK_TRUE(cache.access_ready());
+    CHECK_TRUE(cache.next_access() == hit_reserved);
+}
+
 TEST(address_mapping_boundaries)
 {
     cache_config cfg = make_config("S:8:128:4,L:R:m:N:X,A:8:2,16");
@@ -1342,6 +1531,11 @@ int main()
     RUN_TEST(status_string_tables);
     RUN_TEST(parameter_single_axis_matrix);
     RUN_TEST(parameter_pairwise_smoke_matrix);
+    RUN_TEST(sequence_same_line_hit_miss_matrix);
+    RUN_TEST(sequence_same_set_and_full_cache_eviction);
+    RUN_TEST(sequence_sector_partial_hit_miss_matrix);
+    RUN_TEST(sequence_mshr_merge_and_pending_matrix);
+    RUN_TEST(sequence_texture_hit_reserved_order_matrix);
     RUN_TEST(address_mapping_boundaries);
     RUN_TEST(tag_fill_hit_reserved_and_sector_miss);
     RUN_TEST(tag_lru_fifo_flush_invalidate);

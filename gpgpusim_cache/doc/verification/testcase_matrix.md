@@ -22,6 +22,11 @@
 | TC-TAG-006 | F-CFG-005, F-TAG-004 | unit | Implemented | `test/test_cache_whitebox.cc` | ON_FILL fill 分配 |
 | TC-TAG-007 | F-TAG-003 | unit | Implemented | `test/test_cache_whitebox.cc` | 全 reserved line allocation fail 返回 RESERVATION_FAIL 且统计 res_fails |
 | TC-TAG-008 | F-TAG-005 | unit | Implemented | `test/test_cache_whitebox.cc` | flush 后 dirty line miss、clean line hit；invalidate 后多 line miss |
+| TC-SEQ-001 | F-SEQ-001 | unit | Implemented | `test/test_cache_whitebox.cc` | 同一 line 覆盖 cold miss -> ready hit -> consecutive hit，以及 write-evict hit 后再次 read miss |
+| TC-SEQ-002 | F-SEQ-002 | unit | Implemented | `test/test_cache_whitebox.cc` | direct-mapped cache 填满后，同 set conflict miss 驱逐旧 line，其他 set 保持 hit |
+| TC-SEQ-003 | F-SEQ-003 | unit | Implemented | `test/test_cache_whitebox.cc` | sector partial valid 后目标 sector 返回 SECTOR_MISS，补齐后 hit，冲突后旧 line miss |
+| TC-SEQ-004 | F-SEQ-004 | unit | Implemented | `test/test_cache_whitebox.cc` | same line miss merge 只发一个下游请求，fill 后按 FIFO ready；merge 上限返回 RESERVATION_FAIL |
+| TC-SEQ-005 | F-SEQ-005 | unit | Implemented | `test/test_cache_whitebox.cc` | texture miss fill pending 时后续 hit 返回 HIT_RESERVED，并按 result FIFO 顺序 ready |
 | TC-MSHR-001 | F-MSHR-001 | unit | Implemented | `test/test_main.cc` | add/ready/next_access |
 | TC-MSHR-002 | F-MSHR-002 | unit | Implemented | `test/test_cache_whitebox.cc` | merge 达上限 full |
 | TC-MSHR-003 | F-MSHR-003 | unit | Implemented | `test/test_cache_whitebox.cc` | entry 达上限 full |
@@ -57,7 +62,7 @@
 | TC-PROP-002 | F-PROP-001 | property | Implemented | `test/test_cache_whitebox.cc` | 5-seed read-only 随机 trace 重复运行差分一致，校验 accesses/misses/res_fails 不变量 |
 | TC-PROP-003 | F-PROP-001 | property | Implemented | `test/test_cache_whitebox.cc` | 4-seed read/write 混合 trace 与无驱逐 oracle 对照，校验 hit/miss、per-window read/write hit 和重复运行一致性 |
 | TC-REG-001 | F-REG-001 | regression | Implemented | `run.sh` | 一键回归 unit/scenario/whitebox/death 全部通过 |
-| TC-COV-001 | F-COV-001 | coverage | Implemented | `coverage.sh` | 生成覆盖率报告；当前 line 68.77%、function 71.65%、branch 58.90%；death 子进程 abort 路径不计入 coverage；llvm-cov mismatch 诊断落盘并写入说明 |
+| TC-COV-001 | F-COV-001 | coverage | Implemented | `coverage.sh` | 生成覆盖率报告；当前 line 68.77%、function 71.65%、branch 59.00%；death 子进程 abort 路径不计入 coverage；llvm-cov mismatch 诊断落盘并写入说明 |
 
 ## 多角色检视记录
 
@@ -66,4 +71,5 @@
 | step0 验证方案 | 通过，要求覆盖写策略和 sector/texture | 通过，要求区分用户场景与白盒 | 通过，要求先修测试框架假通过 | 通过，要求 requirements 追踪 |
 | step1 feature | 通过，feature 覆盖主要接口和状态机 | 通过，建议后续补 death tests | 通过，要求每条反标 testcase | 通过，要求 planned 不得冒充 implemented |
 | step2 testcase | 通过，覆盖架构风险点 | 通过，测试分层明确 | 通过，要求默认回归全部可执行 | 通过，要求 run.sh 和 coverage.sh 纳入交付 |
-| step3-step7 | 通过，新增白盒和 death 覆盖关键架构风险；参数矩阵已纳入；覆盖率需后续继续提升 | 通过，run.sh/CMake/coverage.sh 均纳入 | 通过，默认回归 13+10+21+16 全通过 | 通过，文档和追踪矩阵已刷新 |
+| step3-step7 | 通过，新增白盒和 death 覆盖关键架构风险；参数矩阵和 sequence matrix 已纳入；覆盖率需后续继续提升 | 通过，run.sh/CMake/coverage.sh 均纳入 | 通过，默认回归 13+10+26+16 全通过 | 通过，文档和追踪矩阵已刷新 |
+| sequence matrix | 通过，补齐 same line/set/cache/sector/MSHR/texture 序列风险 | 通过，用例以显式状态序列驱动，不依赖随机统计 | 通过，新增 5 条白盒用例并反标 feature | 通过，默认回归 13+10+26+16 全通过，coverage 基线已刷新 |
