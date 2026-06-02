@@ -257,6 +257,10 @@ hit response 进入 `m_ready_response_queue` 后，`access_ready()` 返回 true�
 | 测试专家 | 通过，要求覆盖 read-only/data/read hit/write hit/hit-miss 同周期顺序 | testcase 先标记 Planned，实现阶段不得标记 Implemented |
 | 独立评审代理 | 通过，要求补充 backpressure、统计口径、DataStore 读取时机、exactly-once property 和行为破坏性说明 | 已补入本策略和测试计划 |
 
+## 实现状态
+
+2026-06-02 第一阶段实现已完成：新增兼容开关、bounded hit response queue、line refcount/pin、`access_ready()/next_access()` hit 延迟返回路径，以及 `LINE_PINNED_FAIL`/`HIT_RESPONSE_QUEUE_FULL` fail reason。`TC-HITLAT-001..020` 已反标到 `test/test_cache_whitebox.cc` 的 `hitlat_*` 用例；默认 `./run.sh` 全通过。
+
 ## 评审限制说明
 
 当前会话已达到可新建子 agent 上限，无法新建独立项目经理、设计、验证、测试专家四个 agent。本文档按四角色检查表完成评审记录；后续如果 agent 资源释放，应补一次独立 agent 复审。

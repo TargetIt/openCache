@@ -189,6 +189,8 @@ TEST(config_sector_and_streaming)
     cache_config normal = make_config("N:4:64:2,L:R:m:N:L,A:4:2,8");
     CHECK_EQ(normal.get_atom_sz(), 64u);
     CHECK_FALSE(normal.is_streaming());
+    CHECK_FALSE(normal.defer_hit_response());
+    CHECK_EQ(normal.get_hit_response_queue_size(), 16u);
 
     cache_config sector = make_config("S:4:128:2,L:B:m:F:X,A:4:2,8");
     CHECK_EQ(sector.get_atom_sz(), (unsigned)SECTOR_SIZE);
@@ -221,6 +223,12 @@ TEST(status_string_tables)
              0);
     CHECK_EQ(strcmp(cache_fail_status_str(MSHR_RW_PENDING),
                     "MSHR_RW_PENDING"),
+             0);
+    CHECK_EQ(strcmp(cache_fail_status_str(LINE_PINNED_FAIL),
+                    "LINE_PINNED_FAIL"),
+             0);
+    CHECK_EQ(strcmp(cache_fail_status_str(HIT_RESPONSE_QUEUE_FULL),
+                    "HIT_RESPONSE_QUEUE_FULL"),
              0);
 }
 
@@ -876,11 +884,15 @@ TEST(fail_reason_counters)
     stats.inc_fail_stats(GLOBAL_ACC_R, MSHR_ENRTY_FAIL, 0);
     stats.inc_fail_stats(GLOBAL_ACC_R, MSHR_MERGE_ENRTY_FAIL, 0);
     stats.inc_fail_stats(GLOBAL_ACC_W, MSHR_RW_PENDING, 0);
+    stats.inc_fail_stats(GLOBAL_ACC_R, LINE_PINNED_FAIL, 0);
+    stats.inc_fail_stats(GLOBAL_ACC_R, HIT_RESPONSE_QUEUE_FULL, 0);
     CHECK_EQ(stats.get_fail_stats(GLOBAL_ACC_R, LINE_ALLOC_FAIL), 1ull);
     CHECK_EQ(stats.get_fail_stats(GLOBAL_ACC_R, MISS_QUEUE_FULL), 1ull);
     CHECK_EQ(stats.get_fail_stats(GLOBAL_ACC_R, MSHR_ENRTY_FAIL), 1ull);
     CHECK_EQ(stats.get_fail_stats(GLOBAL_ACC_R, MSHR_MERGE_ENRTY_FAIL), 1ull);
     CHECK_EQ(stats.get_fail_stats(GLOBAL_ACC_W, MSHR_RW_PENDING), 1ull);
+    CHECK_EQ(stats.get_fail_stats(GLOBAL_ACC_R, LINE_PINNED_FAIL), 1ull);
+    CHECK_EQ(stats.get_fail_stats(GLOBAL_ACC_R, HIT_RESPONSE_QUEUE_FULL), 1ull);
 }
 
 TEST(data_cache_read_and_write_policies)
@@ -1523,6 +1535,393 @@ TEST(port_timing_visibility)
     CHECK_TRUE(cache.fill_port_free());
 }
 
+TEST(hitlat_default_compatibility)
+{
+    simple_mem_interface mem(64);
+    gpgpu_sim gpu;
+    cache_config cfg = make_config("N:4:64:2,L:R:m:N:L,A:4:2,16");
+    read_only_cache cache("HitLatCompat", cfg, 0, 0, &mem, IN_L1C_MISS_QUEUE,
+                          OTHER_GPU_CACHE, &gpu);
+    fill_read_only_line(cache, mem, 0x1000, 1);
+
+    std::list<cache_event> events;
+    mem_fetch *hit = new_mf(0x1000, 4, false, GLOBAL_ACC_R, 3);
+    CHECK_EQ(cache.access(hit->get_addr(), hit, 3, events), HIT);
+    CHECK_FALSE(cache.access_ready());
+}
+
+TEST(hitlat_read_only_deferred_ready_latency)
+{
+    simple_mem_interface mem(64);
+    gpgpu_sim gpu;
+    cache_config cfg = make_config("N:4:64:2,L:R:m:N:L,A:4:2,16:1,8");
+    cfg.set_defer_hit_response(true);
+    cfg.set_hit_response_queue_size(4);
+    read_only_cache cache("HitLatRO", cfg, 0, 0, &mem, IN_L1C_MISS_QUEUE,
+                          OTHER_GPU_CACHE, &gpu);
+    fill_read_only_line(cache, mem, 0x1000, 1);
+
+    std::list<cache_event> events;
+    mem_fetch *hit = new_mf(0x1000, 16, false, GLOBAL_ACC_R, 3);
+    CHECK_EQ(cache.access(hit->get_addr(), hit, 3, events), HIT);
+    CHECK_FALSE(cache.access_ready());
+    cache.cycle();
+    CHECK_FALSE(cache.access_ready());
+    cache.cycle();
+    CHECK_TRUE(cache.access_ready());
+    CHECK_TRUE(cache.next_access() == hit);
+    CHECK_FALSE(cache.access_ready());
+}
+
+TEST(hitlat_data_read_and_write_deferred_ready)
+{
+    simple_mem_interface mem(64);
+    simple_mf_allocator allocator;
+    gpgpu_sim gpu;
+    cache_config cfg = make_config("N:4:64:2,L:B:m:F:L,A:4:2,16:1,8");
+    cfg.set_defer_hit_response(true);
+    cfg.set_hit_response_queue_size(4);
+    l1_cache cache("HitLatData", cfg, 0, 0, &mem, &allocator,
+                   IN_L1D_MISS_QUEUE, &gpu, L1_GPU_CACHE);
+
+    std::list<cache_event> events;
+    mem_fetch *warm = new_mf(0x2000, 4, false, GLOBAL_ACC_R, 1);
+    CHECK_EQ(cache.access(warm->get_addr(), warm, 1, events), MISS);
+    drain_one_level(cache, mem, 2);
+
+    events.clear();
+    mem_fetch *read_hit = new_mf(0x2000, 16, false, GLOBAL_ACC_R, 3);
+    CHECK_EQ(cache.access(read_hit->get_addr(), read_hit, 3, events), HIT);
+    CHECK_FALSE(cache.access_ready());
+    cache.cycle();
+    CHECK_FALSE(cache.access_ready());
+    cache.cycle();
+    CHECK_TRUE(cache.access_ready());
+    CHECK_TRUE(cache.next_access() == read_hit);
+
+    events.clear();
+    mem_fetch *write_hit = new_mf(0x2000, 8, true, GLOBAL_ACC_W, 6,
+                                  sector_mask(0), byte_mask_range(0, 8));
+    CHECK_EQ(cache.access(write_hit->get_addr(), write_hit, 6, events), HIT);
+    CHECK_FALSE(has_event(events, WRITE_REQUEST_SENT));
+    cache.cycle();
+    CHECK_TRUE(cache.access_ready());
+    CHECK_TRUE(cache.next_access() == write_hit);
+
+    simple_mem_interface wt_mem(64);
+    cache_config wt_cfg = make_config("N:4:64:2,L:T:m:N:L,A:4:2,16");
+    wt_cfg.set_defer_hit_response(true);
+    wt_cfg.set_hit_response_queue_size(4);
+    l1_cache wt_cache("HitLatWT", wt_cfg, 0, 0, &wt_mem, &allocator,
+                      IN_L1D_MISS_QUEUE, &gpu, L1_GPU_CACHE);
+    events.clear();
+    mem_fetch *wt_warm = new_mf(0x2400, 4, false, GLOBAL_ACC_R, 8);
+    CHECK_EQ(wt_cache.access(wt_warm->get_addr(), wt_warm, 8, events), MISS);
+    drain_one_level(wt_cache, wt_mem, 9);
+    events.clear();
+    mem_fetch *wt_write = new_mf(0x2400, 4, true, GLOBAL_ACC_W, 10);
+    CHECK_EQ(wt_cache.access(wt_write->get_addr(), wt_write, 10, events), HIT);
+    CHECK_TRUE(has_event(events, WRITE_REQUEST_SENT));
+    wt_cache.cycle();
+    CHECK_TRUE(wt_cache.access_ready());
+    CHECK_TRUE(wt_cache.next_access() == wt_write);
+}
+
+TEST(hitlat_same_cycle_hit_ready_precedes_miss_ready)
+{
+    simple_mem_interface mem(64);
+    gpgpu_sim gpu;
+    cache_config cfg = make_config("N:1:64:2,L:R:m:N:L,A:4:2,16");
+    cfg.set_defer_hit_response(true);
+    cfg.set_hit_response_queue_size(4);
+    read_only_cache cache("HitLatReadyOrder", cfg, 0, 0, &mem,
+                          IN_L1C_MISS_QUEUE, OTHER_GPU_CACHE, &gpu);
+    fill_read_only_line(cache, mem, 0x0000, 1);
+
+    std::list<cache_event> events;
+    mem_fetch *miss = new_mf(0x0040, 4, false, GLOBAL_ACC_R, 3);
+    CHECK_EQ(cache.access(miss->get_addr(), miss, 3, events), MISS);
+    cache.cycle();
+    CHECK_EQ(mem.queue.size(), 1u);
+    mem_fetch *resp = mem.queue.front();
+    mem.queue.pop_front();
+
+    events.clear();
+    mem_fetch *hit = new_mf(0x0000, 4, false, GLOBAL_ACC_R, 4);
+    CHECK_EQ(cache.access(hit->get_addr(), hit, 4, events), HIT);
+    cache.fill(resp, 4);
+    cache.cycle();
+    CHECK_TRUE(cache.access_ready());
+    CHECK_TRUE(cache.next_access() == hit);
+    CHECK_TRUE(cache.access_ready());
+    CHECK_TRUE(cache.next_access() == miss);
+    CHECK_FALSE(cache.access_ready());
+}
+
+TEST(hitlat_stats_port_and_exactly_once_trace)
+{
+    simple_mem_interface mem(256);
+    simple_mf_allocator allocator;
+    gpgpu_sim gpu;
+    cache_config cfg = make_config("N:8:64:2,L:B:m:N:L,A:8:4,32:1,8");
+    cfg.set_defer_hit_response(true);
+    cfg.set_hit_response_queue_size(8);
+    l1_cache cache("HitLatStats", cfg, 0, 0, &mem, &allocator,
+                   IN_L1D_MISS_QUEUE, &gpu, L1_GPU_CACHE);
+
+    std::vector<mem_fetch *> accepted;
+    std::vector<mem_fetch *> returned;
+    const new_addr_type trace[] = {0x0000, 0x0040, 0x0000, 0x0008,
+                                   0x0040, 0x0080, 0x0084, 0x0000};
+    for (unsigned i = 0; i < sizeof(trace) / sizeof(trace[0]); ++i) {
+        std::list<cache_event> events;
+        mem_fetch *mf = new_mf(trace[i], 16, false, GLOBAL_ACC_R, i);
+        cache_request_status status = cache.access(mf->get_addr(), mf, i, events);
+        if (status != RESERVATION_FAIL)
+            accepted.push_back(mf);
+
+        for (unsigned step = 0; step < 8; ++step) {
+            cache.cycle();
+            while (!mem.queue.empty()) {
+                mem_fetch *resp = mem.queue.front();
+                mem.queue.pop_front();
+                cache.fill(resp, i + step + 1);
+            }
+            while (cache.access_ready())
+                returned.push_back(cache.next_access());
+        }
+    }
+
+    CHECK_EQ(returned.size(), accepted.size());
+    for (unsigned i = 0; i < accepted.size(); ++i)
+        CHECK_TRUE(returned[i] == accepted[i]);
+
+    cache_sub_stats css;
+    cache.get_sub_stats(css);
+    CHECK_EQ(css.accesses, (unsigned long long)accepted.size());
+    CHECK_TRUE(css.misses > 0);
+    CHECK_TRUE(css.data_port_busy_cycles > 0);
+}
+
+TEST(hitlat_queue_backpressure_and_recovery)
+{
+    simple_mem_interface mem(64);
+    gpgpu_sim gpu;
+    cache_config cfg = make_config("N:4:64:2,L:R:m:N:L,A:4:2,16");
+    cfg.set_defer_hit_response(true);
+    cfg.set_hit_response_queue_size(1);
+    read_only_cache cache("HitLatQueue", cfg, 0, 0, &mem, IN_L1C_MISS_QUEUE,
+                          OTHER_GPU_CACHE, &gpu);
+    fill_read_only_line(cache, mem, 0x3000, 1);
+
+    std::list<cache_event> events;
+    mem_fetch *first = new_mf(0x3000, 4, false, GLOBAL_ACC_R, 3);
+    CHECK_EQ(cache.access(first->get_addr(), first, 3, events), HIT);
+    events.clear();
+    mem_fetch *blocked = new_mf(0x3004, 4, false, GLOBAL_ACC_R, 4);
+    CHECK_EQ(cache.access(blocked->get_addr(), blocked, 4, events),
+             RESERVATION_FAIL);
+    CHECK_EQ(cache.get_fail_stats(GLOBAL_ACC_R, HIT_RESPONSE_QUEUE_FULL), 1ull);
+
+    cache.cycle();
+    CHECK_TRUE(cache.access_ready());
+    CHECK_TRUE(cache.next_access() == first);
+    events.clear();
+    mem_fetch *retry = new_mf(0x3004, 4, false, GLOBAL_ACC_R, 5);
+    CHECK_EQ(cache.access(retry->get_addr(), retry, 5, events), HIT);
+}
+
+TEST(hitlat_pending_hit_pins_line_until_next_access)
+{
+    simple_mem_interface mem(64);
+    gpgpu_sim gpu;
+    cache_config cfg = make_config("N:1:64:1,L:R:m:N:L,A:4:2,16");
+    cfg.set_defer_hit_response(true);
+    cfg.set_hit_response_queue_size(4);
+    read_only_cache cache("HitLatPin", cfg, 0, 0, &mem, IN_L1C_MISS_QUEUE,
+                          OTHER_GPU_CACHE, &gpu);
+    fill_read_only_line(cache, mem, 0x0000, 1);
+
+    std::list<cache_event> events;
+    mem_fetch *hit = new_mf(0x0000, 4, false, GLOBAL_ACC_R, 3);
+    CHECK_EQ(cache.access(hit->get_addr(), hit, 3, events), HIT);
+    events.clear();
+    mem_fetch *conflict = new_mf(0x0040, 4, false, GLOBAL_ACC_R, 4);
+    CHECK_EQ(cache.access(conflict->get_addr(), conflict, 4, events),
+             RESERVATION_FAIL);
+    CHECK_EQ(cache.get_fail_stats(GLOBAL_ACC_R, LINE_PINNED_FAIL), 1ull);
+
+    cache.cycle();
+    CHECK_TRUE(cache.access_ready());
+    CHECK_TRUE(cache.next_access() == hit);
+    events.clear();
+    mem_fetch *after_unpin = new_mf(0x0040, 4, false, GLOBAL_ACC_R, 5);
+    CHECK_EQ(cache.access(after_unpin->get_addr(), after_unpin, 5, events),
+             MISS);
+}
+
+TEST(hitlat_multiple_hits_refcount_decrements_one_by_one)
+{
+    simple_mem_interface mem(64);
+    gpgpu_sim gpu;
+    cache_config cfg = make_config("N:1:64:1,L:R:m:N:L,A:4:2,16");
+    cfg.set_defer_hit_response(true);
+    cfg.set_hit_response_queue_size(4);
+    read_only_cache cache("HitLatMultiPin", cfg, 0, 0, &mem,
+                          IN_L1C_MISS_QUEUE, OTHER_GPU_CACHE, &gpu);
+    fill_read_only_line(cache, mem, 0x0000, 1);
+
+    std::list<cache_event> events;
+    mem_fetch *hit0 = new_mf(0x0000, 4, false, GLOBAL_ACC_R, 3);
+    mem_fetch *hit1 = new_mf(0x0004, 4, false, GLOBAL_ACC_R, 4);
+    CHECK_EQ(cache.access(hit0->get_addr(), hit0, 3, events), HIT);
+    events.clear();
+    CHECK_EQ(cache.access(hit1->get_addr(), hit1, 4, events), HIT);
+    cache.cycle();
+    CHECK_TRUE(cache.access_ready());
+    CHECK_TRUE(cache.next_access() == hit0);
+
+    events.clear();
+    mem_fetch *still_pinned = new_mf(0x0040, 4, false, GLOBAL_ACC_R, 5);
+    CHECK_EQ(cache.access(still_pinned->get_addr(), still_pinned, 5, events),
+             RESERVATION_FAIL);
+    CHECK_TRUE(cache.access_ready());
+    CHECK_TRUE(cache.next_access() == hit1);
+
+    events.clear();
+    mem_fetch *after_all = new_mf(0x0040, 4, false, GLOBAL_ACC_R, 6);
+    CHECK_EQ(cache.access(after_all->get_addr(), after_all, 6, events), MISS);
+}
+
+TEST(hitlat_mshr_merge_pins_each_ready_response)
+{
+    simple_mem_interface mem(64);
+    gpgpu_sim gpu;
+    cache_config cfg = make_config("N:1:64:1,L:R:m:N:L,A:4:2,16");
+    cfg.set_defer_hit_response(true);
+    cfg.set_hit_response_queue_size(4);
+    read_only_cache cache("HitLatMshrPin", cfg, 0, 0, &mem,
+                          IN_L1C_MISS_QUEUE, OTHER_GPU_CACHE, &gpu);
+    std::list<cache_event> events;
+
+    mem_fetch *first = new_mf(0x0000, 4, false, GLOBAL_ACC_R, 1);
+    CHECK_EQ(cache.access(first->get_addr(), first, 1, events), MISS);
+    events.clear();
+    mem_fetch *merged = new_mf(0x0004, 4, false, GLOBAL_ACC_R, 2);
+    CHECK_EQ(cache.access(merged->get_addr(), merged, 2, events), MISS);
+    cache.cycle();
+    CHECK_EQ(mem.queue.size(), 1u);
+    mem_fetch *resp = mem.queue.front();
+    mem.queue.pop_front();
+    cache.fill(resp, 3);
+
+    CHECK_TRUE(cache.access_ready());
+    CHECK_TRUE(cache.next_access() == first);
+    events.clear();
+    mem_fetch *conflict = new_mf(0x0040, 4, false, GLOBAL_ACC_R, 4);
+    CHECK_EQ(cache.access(conflict->get_addr(), conflict, 4, events),
+             RESERVATION_FAIL);
+
+    CHECK_TRUE(cache.access_ready());
+    CHECK_TRUE(cache.next_access() == merged);
+    events.clear();
+    mem_fetch *after_all = new_mf(0x0040, 4, false, GLOBAL_ACC_R, 5);
+    CHECK_EQ(cache.access(after_all->get_addr(), after_all, 5, events), MISS);
+}
+
+TEST(hitlat_sector_line_level_pin)
+{
+    simple_mem_interface mem(64);
+    simple_mf_allocator allocator;
+    gpgpu_sim gpu;
+    cache_config cfg = make_config("S:1:128:1,L:B:m:N:L,A:4:2,16");
+    cfg.set_defer_hit_response(true);
+    cfg.set_hit_response_queue_size(4);
+    l1_cache cache("HitLatSectorPin", cfg, 0, 0, &mem, &allocator,
+                   IN_L1D_MISS_QUEUE, &gpu, L1_GPU_CACHE);
+    std::list<cache_event> events;
+
+    mem_fetch *warm = new_mf(0x0000, 4, false, GLOBAL_ACC_R, 1,
+                             sector_mask(0), byte_mask_range(0, 4));
+    CHECK_EQ(cache.access(warm->get_addr(), warm, 1, events), MISS);
+    drain_one_level(cache, mem, 2);
+
+    events.clear();
+    mem_fetch *hit = new_mf(0x0000, 4, false, GLOBAL_ACC_R, 3,
+                            sector_mask(0), byte_mask_range(0, 4));
+    CHECK_EQ(cache.access(hit->get_addr(), hit, 3, events), HIT);
+    events.clear();
+    mem_fetch *conflict = new_mf(0x0080, 4, false, GLOBAL_ACC_R, 4,
+                                 sector_mask(0), byte_mask_range(0, 4));
+    CHECK_EQ(cache.access(conflict->get_addr(), conflict, 4, events),
+             RESERVATION_FAIL);
+    CHECK_EQ(cache.get_fail_stats(GLOBAL_ACC_R, LINE_PINNED_FAIL), 1ull);
+}
+
+TEST(hitlat_write_evict_invalid_line_stays_pinned)
+{
+    simple_mem_interface mem(64);
+    simple_mf_allocator allocator;
+    gpgpu_sim gpu;
+    cache_config cfg = make_config("N:1:64:1,L:E:m:N:L,A:4:2,16");
+    cfg.set_defer_hit_response(true);
+    cfg.set_hit_response_queue_size(4);
+    l1_cache cache("HitLatWriteEvictPin", cfg, 0, 0, &mem, &allocator,
+                   IN_L1D_MISS_QUEUE, &gpu, L1_GPU_CACHE);
+    std::list<cache_event> events;
+
+    mem_fetch *warm = new_mf(0x0000, 4, false, GLOBAL_ACC_R, 1);
+    CHECK_EQ(cache.access(warm->get_addr(), warm, 1, events), MISS);
+    drain_one_level(cache, mem, 2);
+
+    events.clear();
+    mem_fetch *write = new_mf(0x0000, 4, true, GLOBAL_ACC_W, 3);
+    CHECK_EQ(cache.access(write->get_addr(), write, 3, events), HIT);
+    CHECK_TRUE(has_event(events, WRITE_REQUEST_SENT));
+    events.clear();
+    mem_fetch *same_line_read = new_mf(0x0000, 4, false, GLOBAL_ACC_R, 4);
+    CHECK_EQ(cache.access(same_line_read->get_addr(), same_line_read, 4, events),
+             RESERVATION_FAIL);
+    CHECK_EQ(cache.get_fail_stats(GLOBAL_ACC_R, LINE_PINNED_FAIL), 1ull);
+
+    cache.cycle();
+    CHECK_TRUE(cache.access_ready());
+    CHECK_TRUE(cache.next_access() == write);
+    events.clear();
+    mem_fetch *after_unpin = new_mf(0x0000, 4, false, GLOBAL_ACC_R, 5);
+    CHECK_EQ(cache.access(after_unpin->get_addr(), after_unpin, 5, events),
+             MISS);
+}
+
+TEST(hitlat_datastore_timing_token_only)
+{
+    DataStore store;
+    uint8_t before[4] = {1, 2, 3, 4};
+    uint8_t after[4] = {9, 8, 7, 6};
+    store.write(0x1000, before, 4);
+
+    simple_mem_interface mem(64);
+    gpgpu_sim gpu;
+    cache_config cfg = make_config("N:4:64:2,L:R:m:N:L,A:4:2,16");
+    cfg.set_defer_hit_response(true);
+    cfg.set_hit_response_queue_size(4);
+    read_only_cache cache("HitLatDataStore", cfg, 0, 0, &mem,
+                          IN_L1C_MISS_QUEUE, OTHER_GPU_CACHE, &gpu);
+    fill_read_only_line(cache, mem, 0x1000, 1);
+
+    std::list<cache_event> events;
+    mem_fetch *hit = new_mf(0x1000, 4, false, GLOBAL_ACC_R, 3);
+    std::vector<uint8_t> accepted_snapshot = store.read(0x1000, 4);
+    CHECK_EQ(cache.access(hit->get_addr(), hit, 3, events), HIT);
+    store.write(0x1000, after, 4);
+    std::vector<uint8_t> current_data = store.read(0x1000, 4);
+    CHECK_EQ(accepted_snapshot[0], 1u);
+    CHECK_EQ(current_data[0], 9u);
+    cache.cycle();
+    CHECK_TRUE(cache.access_ready());
+    CHECK_TRUE(cache.next_access() == hit);
+}
+
 int main()
 {
     printf("\n========== GPGPU-Sim Cache Deep Whitebox Test Suite ==========\n\n");
@@ -1553,6 +1952,18 @@ int main()
     RUN_TEST(multi_seed_differential_property_trace);
     RUN_TEST(mixed_read_write_differential_property_trace);
     RUN_TEST(port_timing_visibility);
+    RUN_TEST(hitlat_default_compatibility);
+    RUN_TEST(hitlat_read_only_deferred_ready_latency);
+    RUN_TEST(hitlat_data_read_and_write_deferred_ready);
+    RUN_TEST(hitlat_same_cycle_hit_ready_precedes_miss_ready);
+    RUN_TEST(hitlat_stats_port_and_exactly_once_trace);
+    RUN_TEST(hitlat_queue_backpressure_and_recovery);
+    RUN_TEST(hitlat_pending_hit_pins_line_until_next_access);
+    RUN_TEST(hitlat_multiple_hits_refcount_decrements_one_by_one);
+    RUN_TEST(hitlat_mshr_merge_pins_each_ready_response);
+    RUN_TEST(hitlat_sector_line_level_pin);
+    RUN_TEST(hitlat_write_evict_invalid_line_stays_pinned);
+    RUN_TEST(hitlat_datastore_timing_token_only);
 
     printf("\n========== Results: %d/%d tests passed ==========\n",
            tests_passed, tests_run);

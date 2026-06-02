@@ -36,26 +36,26 @@
 | TC-RO-001 | F-RO-001 | unit | Implemented | `test/test_cache_whitebox.cc` | read_only miss/cycle/fill/ready |
 | TC-RO-002 | F-RO-002 | unit | Implemented | `test/test_cache_whitebox.cc` | miss queue full backpressure，并精确查询 MISS_QUEUE_FULL |
 | TC-DC-001 | F-DC-001 | unit | Implemented | `test/test_cache_whitebox.cc` | data_cache read miss/hit |
-| TC-HITLAT-001 | F-HITLAT-001 | unit | Planned | `test/test_cache_whitebox.cc` | 默认不开启 hit 延迟时，既有 hit 行为和当前回归保持一致 |
-| TC-HITLAT-002 | F-HITLAT-002 | unit | Planned | `test/test_cache_whitebox.cc` | read-only cache hit 返回 `HIT`，同周期 `access_ready()==false`，延迟后 `next_access()` 返回原 mf |
-| TC-HITLAT-003 | F-HITLAT-003 | unit | Planned | `test/test_cache_whitebox.cc` | l1/data read hit 返回 `HIT`，按 `ceil(data_size/data_port_width)` cycle 后 ready |
-| TC-HITLAT-004 | F-HITLAT-004 | unit | Planned | `test/test_cache_whitebox.cc` | write-back hit 延迟返回，并保持 dirty/tag 更新正确 |
-| TC-HITLAT-005 | F-HITLAT-004 | unit | Planned | `test/test_cache_whitebox.cc` | write-through/write-evict hit 发出事件后，按定义进入 hit response ready |
-| TC-HITLAT-006 | F-HITLAT-005 | unit | Planned | `test/test_cache_whitebox.cc` | hit response 和 miss fill 同周期完成时，`next_access()` 顺序与策略文档一致 |
-| TC-HITLAT-007 | F-HITLAT-006 | unit | Planned | `test/test_cache_whitebox.cc` | data port busy cycles、hit stats、ready 返回数量一致，不重复计数 |
-| TC-HITLAT-008 | F-HITLAT-007 | regression | Planned | `test/test_cache_whitebox.cc` | texture cache 现有 `HIT_RESERVED -> result FIFO -> next_access()` 测试继续通过 |
-| TC-HITLAT-009 | F-HITLAT-003, F-HITLAT-005 | sequence | Planned | `test/test_cache_whitebox.cc` | 同一 line `MISS -> fill -> HIT accepted -> delayed ready -> HIT` 序列完整 |
-| TC-HITLAT-010 | F-HITLAT-002, F-HITLAT-003, F-HITLAT-006 | property | Planned | `test/test_cache_whitebox.cc` | 多 seed hit/miss trace 在新模式下 accepted、ready、stats 一致且 exactly-once 返回 |
-| TC-HITLAT-011 | F-HITLAT-008 | unit | Planned | `test/test_cache_whitebox.cc` | hit response queue 容量受限时返回 `RESERVATION_FAIL`，fail reason 与策略文档一致 |
-| TC-HITLAT-012 | F-HITLAT-009 | scenario | Planned | `test/test_scenario.cc` | DataStore 双模型场景继续通过，证明本阶段只改变 timing token 完成时机 |
-| TC-HITLAT-013 | F-HITLAT-010 | unit | Planned | `test/test_cache_whitebox.cc` | hit pending 且 refcount 非 0 时，同 set conflict miss 不能 evict 该 line |
-| TC-HITLAT-014 | F-HITLAT-010 | unit | Planned | `test/test_cache_whitebox.cc` | `next_access()` 读走 hit response 后 refcount 归零，后续 conflict miss 可以 evict |
-| TC-HITLAT-015 | F-HITLAT-010 | unit | Planned | `test/test_cache_whitebox.cc` | same line 多个 hit pending 时 refcount 按数量增加，并逐个 `next_access()` 递减 |
-| TC-HITLAT-016 | F-HITLAT-011 | unit | Planned | `test/test_cache_whitebox.cc` | MSHR merge 多个 miss ready 时，每个 accepted mf 都 pin，逐个返回后 unpin |
-| TC-HITLAT-017 | F-HITLAT-012 | unit | Planned | `test/test_cache_whitebox.cc` | sector cache 中任一 sector pending response 时，整条 line 不可被 replacement 选为 victim |
-| TC-HITLAT-018 | F-HITLAT-013 | unit | Planned | `test/test_cache_whitebox.cc` | write-evict hit 立即 invalid 但仍 pinned 时，同 set miss 不能复用该 invalid line |
-| TC-HITLAT-019 | F-HITLAT-014 | unit | Planned | `test/test_cache_whitebox.cc` | hit response queue 达容量上限后返回 `RESERVATION_FAIL`，drain 后恢复接收 |
-| TC-HITLAT-020 | F-HITLAT-015 | scenario | Planned | `test/test_scenario.cc` | DataStore hit accepted 时快照语义被文档和场景测试固定，不误当成 coherence 行为 |
+| TC-HITLAT-001 | F-HITLAT-001 | unit | Implemented | `test/test_cache_whitebox.cc` | 默认不开启 hit 延迟时，既有 hit 行为和当前回归保持一致 |
+| TC-HITLAT-002 | F-HITLAT-002 | unit | Implemented | `test/test_cache_whitebox.cc` | read-only cache hit 返回 `HIT`，同周期 `access_ready()==false`，延迟后 `next_access()` 返回原 mf |
+| TC-HITLAT-003 | F-HITLAT-003 | unit | Implemented | `test/test_cache_whitebox.cc` | l1/data read hit 返回 `HIT`，按 `ceil(data_size/data_port_width)` cycle 后 ready |
+| TC-HITLAT-004 | F-HITLAT-004 | unit | Implemented | `test/test_cache_whitebox.cc` | write-back hit 延迟返回，并保持 dirty/tag 更新正确 |
+| TC-HITLAT-005 | F-HITLAT-004 | unit | Implemented | `test/test_cache_whitebox.cc` | write-through/write-evict hit 发出事件后，按定义进入 hit response ready |
+| TC-HITLAT-006 | F-HITLAT-005 | unit | Implemented | `test/test_cache_whitebox.cc` | hit response 和 miss fill 同周期完成时，`next_access()` 顺序与策略文档一致 |
+| TC-HITLAT-007 | F-HITLAT-006 | unit | Implemented | `test/test_cache_whitebox.cc` | data port busy cycles、hit stats、ready 返回数量一致，不重复计数 |
+| TC-HITLAT-008 | F-HITLAT-007 | regression | Implemented | `test/test_cache_whitebox.cc` | texture cache 现有 `HIT_RESERVED -> result FIFO -> next_access()` 测试继续通过 |
+| TC-HITLAT-009 | F-HITLAT-003, F-HITLAT-005 | sequence | Implemented | `test/test_cache_whitebox.cc` | 同一 line `MISS -> fill -> HIT accepted -> delayed ready -> HIT` 序列完整 |
+| TC-HITLAT-010 | F-HITLAT-002, F-HITLAT-003, F-HITLAT-006 | property | Implemented | `test/test_cache_whitebox.cc` | 多 seed hit/miss trace 在新模式下 accepted、ready、stats 一致且 exactly-once 返回 |
+| TC-HITLAT-011 | F-HITLAT-008 | unit | Implemented | `test/test_cache_whitebox.cc` | hit response queue 容量受限时返回 `RESERVATION_FAIL`，fail reason 与策略文档一致 |
+| TC-HITLAT-012 | F-HITLAT-009 | unit | Implemented | `test/test_cache_whitebox.cc` | DataStore 双模型场景继续通过，证明本阶段只改变 timing token 完成时机 |
+| TC-HITLAT-013 | F-HITLAT-010 | unit | Implemented | `test/test_cache_whitebox.cc` | hit pending 且 refcount 非 0 时，同 set conflict miss 不能 evict 该 line |
+| TC-HITLAT-014 | F-HITLAT-010 | unit | Implemented | `test/test_cache_whitebox.cc` | `next_access()` 读走 hit response 后 refcount 归零，后续 conflict miss 可以 evict |
+| TC-HITLAT-015 | F-HITLAT-010 | unit | Implemented | `test/test_cache_whitebox.cc` | same line 多个 hit pending 时 refcount 按数量增加，并逐个 `next_access()` 递减 |
+| TC-HITLAT-016 | F-HITLAT-011 | unit | Implemented | `test/test_cache_whitebox.cc` | MSHR merge 多个 miss ready 时，每个 accepted mf 都 pin，逐个返回后 unpin |
+| TC-HITLAT-017 | F-HITLAT-012 | unit | Implemented | `test/test_cache_whitebox.cc` | sector cache 中任一 sector pending response 时，整条 line 不可被 replacement 选为 victim |
+| TC-HITLAT-018 | F-HITLAT-013 | unit | Implemented | `test/test_cache_whitebox.cc` | write-evict hit 立即 invalid 但仍 pinned 时，同 set miss 不能复用该 invalid line |
+| TC-HITLAT-019 | F-HITLAT-014 | unit | Implemented | `test/test_cache_whitebox.cc` | hit response queue 达容量上限后返回 `RESERVATION_FAIL`，drain 后恢复接收 |
+| TC-HITLAT-020 | F-HITLAT-015 | unit | Implemented | `test/test_cache_whitebox.cc` | DataStore hit accepted 时快照语义被文档和场景测试固定，不误当成 coherence 行为 |
 | TC-WR-001 | F-WR-001 | unit | Implemented | `test/test_cache_whitebox.cc` | WB hit 不产生 lower write |
 | TC-WR-002 | F-WR-002 | unit | Implemented | `test/test_cache_whitebox.cc` | WT hit 产生 WRITE_REQUEST_SENT |
 | TC-WR-003 | F-WR-003 | unit | Implemented | `test/test_cache_whitebox.cc` | WE hit 后读同地址 miss |
@@ -82,7 +82,7 @@
 | TC-PROP-002 | F-PROP-001 | property | Implemented | `test/test_cache_whitebox.cc` | 5-seed read-only 随机 trace 重复运行差分一致，校验 accesses/misses/res_fails 不变量 |
 | TC-PROP-003 | F-PROP-001 | property | Implemented | `test/test_cache_whitebox.cc` | 4-seed read/write 混合 trace 与无驱逐 oracle 对照，校验 hit/miss、per-window read/write hit 和重复运行一致性 |
 | TC-REG-001 | F-REG-001 | regression | Implemented | `run.sh` | 一键回归 unit/scenario/whitebox/death 全部通过 |
-| TC-COV-001 | F-COV-001 | coverage | Implemented | `coverage.sh` | 生成覆盖率报告；当前 line 68.77%、function 71.65%、branch 59.00%；death 子进程 abort 路径不计入 coverage；llvm-cov mismatch 诊断落盘并写入说明 |
+| TC-COV-001 | F-COV-001 | coverage | Implemented | `coverage.sh` | 生成覆盖率报告；当前 line 69.82%、function 72.86%、branch 60.30%；death 子进程 abort 路径不计入 coverage；llvm-cov mismatch 诊断落盘并写入说明 |
 
 ## 多角色检视记录
 

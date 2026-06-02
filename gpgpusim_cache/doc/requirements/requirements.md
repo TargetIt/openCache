@@ -99,8 +99,8 @@
 | GPGPUSIM-HITLAT-003 | 完成项目经理、设计、验证、测试专家评审，并记录独立评审代理意见 | 已完成 |
 | GPGPUSIM-HITLAT-004 | 在 feature/testcase 文档中新增 planned 追踪项 | 已完成 |
 | GPGPUSIM-HITLAT-005 | 在 `doc/design.md` 中补充 line-level refcount/pin 设计，确保 pending response 未读走前 line 不可被替换 | 已完成 |
-| GPGPUSIM-HITLAT-006 | 实现兼容开关、hit response queue、line pin/refcount 和统一 ready 返回语义 | 待开展 |
-| GPGPUSIM-HITLAT-007 | 实现 planned testcase 并刷新覆盖率与遗留问题 | 待开展 |
+| GPGPUSIM-HITLAT-006 | 实现兼容开关、hit response queue、line pin/refcount 和统一 ready 返回语义 | 已完成 |
+| GPGPUSIM-HITLAT-007 | 实现 planned testcase 并刷新覆盖率与遗留问题 | 已完成 |
 | GPGPUSIM-HITLAT-008 | 将新增和待实现 feature/testcase 按配置、输入、流程、输出四个维度补齐规划 | 已完成 |
 | GPGPUSIM-HITLAT-009 | 为 review 风险补充四维 feature/testcase 规划：write-evict pinned invalid、bounded hit response queue、DataStore 快照语义 | 已完成 |
 
@@ -111,8 +111,9 @@
 3. `doc/design.md` 存在，并明确 line-level refcount/pin 机制。
 4. Feature/testcase 文档已建立 `F-HITLAT-*` 和 `TC-HITLAT-*` 追踪。
 5. 新增和待实现 feature/testcase 已按配置、输入、流程、输出四维记录。
-6. 文档阶段不修改实现代码，不把 planned testcase 标记为 implemented。
-7. 提交前 `git diff --check` 通过。
+6. 默认旧模式保持既有 hit 行为；新模式开启后 hit 经 `access_ready()/next_access()` 延迟返回。
+7. `TC-HITLAT-001..020` 已反标到白盒用例，默认 `./run.sh` 全通过。
+8. 提交前 `git diff --check` 通过。
 
 ### 更新时间
 
@@ -143,7 +144,7 @@
 
 ### 验收标准
 
-1. `./run.sh` 通过：unit 13/13，scenario 86/86 checks，whitebox 26/26，death 16/16。
+1. `./run.sh` 通过：unit 13/13，scenario 86/86 checks，whitebox 38/38，death 16/16。
 2. `./coverage.sh` 通过并输出覆盖率摘要。
 3. Feature/testcase 文档中每条已实现 testcase 映射到测试文件。
 4. 覆盖率基线已记录，低覆盖区域作为后续迭代输入。
@@ -159,10 +160,10 @@
 
 | 指标 | 覆盖率 |
 |------|--------|
-| Region | 54.31% |
-| Function | 71.65% |
-| Line | 68.77% |
-| Branch | 59.00% |
+| Region | 55.49% |
+| Function | 72.86% |
+| Line | 69.82% |
+| Branch | 60.30% |
 
 ### 更新时间
 

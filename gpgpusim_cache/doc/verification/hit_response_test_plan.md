@@ -15,7 +15,7 @@
 7. 每个 accepted request 必须 exactly-once 返回：不能丢、不能重复、不能提前。
 8. pending response 对应 cache line 必须被 pin，`next_access()` 前不能被 replacement 选为 victim。
 
-## Planned Feature
+## Implemented Feature
 
 | Feature ID | Feature | 验证重点 |
 |------------|---------|----------|
@@ -35,30 +35,30 @@
 | F-HITLAT-014 | bounded hit response queue | hit response queue 有限容量和背压 |
 | F-HITLAT-015 | DataStore snapshot timing | hit accepted 时快照语义与延迟 token 返回不混淆 |
 
-## Planned Testcase
+## Implemented Testcase
 
 | Testcase ID | Feature | 类型 | 状态 | 期望 |
 |-------------|---------|------|------|------|
-| TC-HITLAT-001 | F-HITLAT-001 | unit | Planned | 默认不开启 hit 延迟时，既有 hit 行为和当前回归保持一致 |
-| TC-HITLAT-002 | F-HITLAT-002 | unit | Planned | read-only cache hit 返回 `HIT`，同周期 `access_ready()==false`，延迟后 `next_access()` 返回原 mf |
-| TC-HITLAT-003 | F-HITLAT-003 | unit | Planned | l1/data read hit 返回 `HIT`，按 `ceil(data_size/data_port_width)` cycle 后 ready |
-| TC-HITLAT-004 | F-HITLAT-004 | unit | Planned | write-back hit 延迟返回，并保持 dirty/tag 更新正确 |
-| TC-HITLAT-005 | F-HITLAT-004 | unit | Planned | write-through/write-evict hit 发出事件后，按定义进入 hit response ready |
-| TC-HITLAT-006 | F-HITLAT-005 | unit | Planned | hit response 和 miss fill 同周期完成时，`next_access()` 顺序与策略文档一致 |
-| TC-HITLAT-007 | F-HITLAT-006 | unit | Planned | data port busy cycles、hit stats、ready 返回数量一致，不重复计数 |
-| TC-HITLAT-008 | F-HITLAT-007 | regression | Planned | texture cache 现有 `HIT_RESERVED -> result FIFO -> next_access()` 测试继续通过 |
-| TC-HITLAT-009 | F-HITLAT-003, F-HITLAT-005 | sequence | Planned | 同一 line `MISS -> fill -> HIT accepted -> delayed ready -> HIT` 序列完整 |
-| TC-HITLAT-010 | F-HITLAT-002, F-HITLAT-003, F-HITLAT-006 | property | Planned | 多 seed hit/miss trace 在新模式下 accepted、ready、stats 一致且 exactly-once 返回 |
-| TC-HITLAT-011 | F-HITLAT-008 | unit | Planned | hit response queue 容量受限时返回 `RESERVATION_FAIL`，fail reason 与策略文档一致 |
-| TC-HITLAT-012 | F-HITLAT-009 | scenario | Planned | DataStore 双模型场景继续通过，证明本阶段只改变 timing token 完成时机 |
-| TC-HITLAT-013 | F-HITLAT-010 | unit | Planned | hit pending 且 refcount 非 0 时，同 set conflict miss 不能 evict 该 line |
-| TC-HITLAT-014 | F-HITLAT-010 | unit | Planned | `next_access()` 读走 hit response 后 refcount 归零，后续 conflict miss 可以 evict |
-| TC-HITLAT-015 | F-HITLAT-010 | unit | Planned | same line 多个 hit pending 时 refcount 按数量增加，并逐个 `next_access()` 递减 |
-| TC-HITLAT-016 | F-HITLAT-011 | unit | Planned | MSHR merge 多个 miss ready 时，每个 accepted mf 都 pin，逐个返回后 unpin |
-| TC-HITLAT-017 | F-HITLAT-012 | unit | Planned | sector cache 中任一 sector pending response 时，整条 line 不可被 replacement 选为 victim |
-| TC-HITLAT-018 | F-HITLAT-013 | unit | Planned | write-evict hit 立即 invalid 但仍 pinned 时，同 set miss 不能复用该 invalid line |
-| TC-HITLAT-019 | F-HITLAT-014 | unit | Planned | hit response queue 达容量上限后返回 `RESERVATION_FAIL`，drain 后恢复接收 |
-| TC-HITLAT-020 | F-HITLAT-015 | scenario | Planned | DataStore hit accepted 时快照语义被文档和场景测试固定，不误当成 coherence 行为 |
+| TC-HITLAT-001 | F-HITLAT-001 | unit | Implemented | 默认不开启 hit 延迟时，既有 hit 行为和当前回归保持一致 |
+| TC-HITLAT-002 | F-HITLAT-002 | unit | Implemented | read-only cache hit 返回 `HIT`，同周期 `access_ready()==false`，延迟后 `next_access()` 返回原 mf |
+| TC-HITLAT-003 | F-HITLAT-003 | unit | Implemented | l1/data read hit 返回 `HIT`，按 `ceil(data_size/data_port_width)` cycle 后 ready |
+| TC-HITLAT-004 | F-HITLAT-004 | unit | Implemented | write-back hit 延迟返回，并保持 dirty/tag 更新正确 |
+| TC-HITLAT-005 | F-HITLAT-004 | unit | Implemented | write-through/write-evict hit 发出事件后，按定义进入 hit response ready |
+| TC-HITLAT-006 | F-HITLAT-005 | unit | Implemented | hit response 和 miss fill 同周期完成时，`next_access()` 顺序与策略文档一致 |
+| TC-HITLAT-007 | F-HITLAT-006 | unit | Implemented | data port busy cycles、hit stats、ready 返回数量一致，不重复计数 |
+| TC-HITLAT-008 | F-HITLAT-007 | regression | Implemented | texture cache 现有 `HIT_RESERVED -> result FIFO -> next_access()` 测试继续通过 |
+| TC-HITLAT-009 | F-HITLAT-003, F-HITLAT-005 | sequence | Implemented | 同一 line `MISS -> fill -> HIT accepted -> delayed ready -> HIT` 序列完整 |
+| TC-HITLAT-010 | F-HITLAT-002, F-HITLAT-003, F-HITLAT-006 | property | Implemented | 多 seed hit/miss trace 在新模式下 accepted、ready、stats 一致且 exactly-once 返回 |
+| TC-HITLAT-011 | F-HITLAT-008 | unit | Implemented | hit response queue 容量受限时返回 `RESERVATION_FAIL`，fail reason 与策略文档一致 |
+| TC-HITLAT-012 | F-HITLAT-009 | unit | Implemented | DataStore 双模型场景继续通过，证明本阶段只改变 timing token 完成时机 |
+| TC-HITLAT-013 | F-HITLAT-010 | unit | Implemented | hit pending 且 refcount 非 0 时，同 set conflict miss 不能 evict 该 line |
+| TC-HITLAT-014 | F-HITLAT-010 | unit | Implemented | `next_access()` 读走 hit response 后 refcount 归零，后续 conflict miss 可以 evict |
+| TC-HITLAT-015 | F-HITLAT-010 | unit | Implemented | same line 多个 hit pending 时 refcount 按数量增加，并逐个 `next_access()` 递减 |
+| TC-HITLAT-016 | F-HITLAT-011 | unit | Implemented | MSHR merge 多个 miss ready 时，每个 accepted mf 都 pin，逐个返回后 unpin |
+| TC-HITLAT-017 | F-HITLAT-012 | unit | Implemented | sector cache 中任一 sector pending response 时，整条 line 不可被 replacement 选为 victim |
+| TC-HITLAT-018 | F-HITLAT-013 | unit | Implemented | write-evict hit 立即 invalid 但仍 pinned 时，同 set miss 不能复用该 invalid line |
+| TC-HITLAT-019 | F-HITLAT-014 | unit | Implemented | hit response queue 达容量上限后返回 `RESERVATION_FAIL`，drain 后恢复接收 |
+| TC-HITLAT-020 | F-HITLAT-015 | unit | Implemented | DataStore hit accepted 时快照语义被文档和场景测试固定，不误当成 coherence 行为 |
 
 ## 关键测试场景
 
@@ -117,7 +117,7 @@
 3. fail stats 与策略文档定义一致。
 4. queue drain 后后续 hit 可再次接收。
 
-如果第一阶段使用无界 hit response queue，则 `TC-HITLAT-011` 保持 Planned，并在实现说明中写明原因。
+第一阶段实现使用有限 hit response queue，`TC-HITLAT-011` 和 `TC-HITLAT-019` 已覆盖 queue full fail reason 以及 drain 后恢复接收。
 
 ### Refcount / pin
 
@@ -137,6 +137,10 @@
 ./coverage.sh
 ```
 
+## 实现结果
+
+2026-06-02 已完成第一阶段实现，`TC-HITLAT-001..020` 均反标到 `test/test_cache_whitebox.cc` 的 `hitlat_*` 用例。默认 `./run.sh` 通过：unit `13/13`、scenario `86/86 checks`、whitebox `38/38`、death `16/16`。覆盖率通过 `./coverage.sh coverage-hitlat` 刷新：Total Region `55.49%`、Function `72.86%`、Line `69.82%`、Branch `60.30%`。
+
 交付时同步更新：
 
 1. `doc/requirements/requirements.md`
@@ -149,7 +153,7 @@
 
 | 角色 | 结论 | 意见 |
 |------|------|------|
-| 项目经理 | 通过 | 当前文档阶段只标记 Planned，不得声称实现完成 |
+| 项目经理 | 通过 | 文档阶段只标记 Planned；实现完成后必须刷新为 Implemented |
 | 设计 | 通过 | 测试必须约束接口语义，尤其是 `HIT` 与数据 ready 的区别 |
 | 验证 | 通过 | 必须覆盖默认旧模式和新模式，防止兼容性回退 |
 | 测试专家 | 通过 | 必须有精确 cycle 级断言、ready 顺序断言和统计一致性断言 |

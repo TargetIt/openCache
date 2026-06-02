@@ -54,7 +54,8 @@ const char *cache_request_status_str(enum cache_request_status status) {
 const char *cache_fail_status_str(enum cache_reservation_fail_reason status) {
   static const char *static_cache_reservation_fail_reason_str[] = {
       "LINE_ALLOC_FAIL", "MISS_QUEUE_FULL", "MSHR_ENRTY_FAIL",
-      "MSHR_MERGE_ENRTY_FAIL", "MSHR_RW_PENDING"};
+      "MSHR_MERGE_ENRTY_FAIL", "MSHR_RW_PENDING", "LINE_PINNED_FAIL",
+      "HIT_RESPONSE_QUEUE_FULL"};
 
   assert(sizeof(static_cache_reservation_fail_reason_str) /
              sizeof(const char *) ==
@@ -216,6 +217,7 @@ void tag_array::init(int core_id, int type_id) {
   m_type_id = type_id;
   is_used = false;
   m_dirty = 0;
+  m_last_fail_reason = LINE_ALLOC_FAIL;
 }
 
 void tag_array::add_pending_line(mem_fetch *mf) {
@@ -256,6 +258,8 @@ enum cache_request_status tag_array::probe(new_addr_type addr, unsigned &idx,
   unsigned long long valid_timestamp = (unsigned)-1;
 
   bool all_reserved = true;
+  bool saw_pinned = false;
+  m_last_fail_reason = LINE_ALLOC_FAIL;
   // check for hit or pending hit
   for (unsigned way = 0; way < m_config.m_assoc; way++) {
     unsigned index = set_index * m_config.m_assoc + way;
@@ -282,6 +286,10 @@ enum cache_request_status tag_array::probe(new_addr_type addr, unsigned &idx,
       } else {
         assert(line->get_status(mask) == INVALID);
       }
+    }
+    if (line->is_pinned()) {
+      saw_pinned = true;
+      continue;
     }
     if (!line->is_reserved_line()) {
       // percentage of dirty lines in the cache
@@ -317,6 +325,7 @@ enum cache_request_status tag_array::probe(new_addr_type addr, unsigned &idx,
   }
   if (all_reserved) {
     assert(m_config.m_alloc_policy == ON_MISS);
+    if (saw_pinned) m_last_fail_reason = LINE_PINNED_FAIL;
     return RESERVATION_FAIL;  // miss and not enough space in cache to allocate
                               // on miss
   }
@@ -1225,8 +1234,66 @@ bool baseline_cache::bandwidth_management::fill_port_free() const {
   return (m_fill_port_occupied_cycles == 0);
 }
 
+unsigned baseline_cache::hit_response_latency(mem_fetch *mf) const {
+  unsigned data_size = mf->get_data_size();
+  unsigned port_width = m_config.m_data_port_width;
+  unsigned cycles =
+      data_size / port_width + ((data_size % port_width > 0) ? 1 : 0);
+  return cycles == 0 ? 1 : cycles;
+}
+
+void baseline_cache::pin_response(mem_fetch *mf, unsigned cache_index) {
+  cache_block_t *block = m_tag_array->get_block(cache_index);
+  block->pin();
+  m_pending_response_indices[mf] = cache_index;
+}
+
+void baseline_cache::unpin_response(mem_fetch *mf) {
+  pending_response_index_lookup::iterator it =
+      m_pending_response_indices.find(mf);
+  if (it == m_pending_response_indices.end()) return;
+
+  cache_block_t *block = m_tag_array->get_block(it->second);
+  block->unpin();
+  m_pending_response_indices.erase(it);
+}
+
+void baseline_cache::enqueue_hit_response(mem_fetch *mf,
+                                          unsigned cache_index) {
+  pin_response(mf, cache_index);
+  m_hit_response_queue.push_back(
+      delayed_response_entry(mf, hit_response_latency(mf)));
+}
+
+mem_fetch *baseline_cache::next_access() {
+  assert(access_ready());
+  if (!m_ready_response_queue.empty()) {
+    mem_fetch *mf = m_ready_response_queue.front();
+    m_ready_response_queue.pop_front();
+    unpin_response(mf);
+    return mf;
+  }
+
+  mem_fetch *mf = m_mshrs.next_access();
+  unpin_response(mf);
+  return mf;
+}
+
 /// Sends next request to lower level of memory
 void baseline_cache::cycle() {
+  for (std::list<delayed_response_entry>::iterator it =
+           m_hit_response_queue.begin();
+       it != m_hit_response_queue.end();) {
+    assert(it->m_remaining_cycles > 0);
+    --it->m_remaining_cycles;
+    if (it->m_remaining_cycles == 0) {
+      m_ready_response_queue.push_back(it->m_mf);
+      it = m_hit_response_queue.erase(it);
+    } else {
+      ++it;
+    }
+  }
+
   if (!m_miss_queue.empty()) {
     mem_fetch *mf = m_miss_queue.front();
     if (!m_memport->full(mf->size(), mf->get_is_write())) {
@@ -1354,6 +1421,7 @@ void baseline_cache::send_read_request(new_addr_type addr,
       m_tag_array->access(block_addr, time, cache_index, wb, evicted, mf);
 
     m_mshrs.add(mshr_addr, mf);
+    if (m_config.m_defer_hit_response) pin_response(mf, cache_index);
     m_stats.inc_stats(mf->get_access_type(), MSHR_HIT, mf->get_streamID());
     do_miss = true;
 
@@ -1365,6 +1433,7 @@ void baseline_cache::send_read_request(new_addr_type addr,
       m_tag_array->access(block_addr, time, cache_index, wb, evicted, mf);
 
     m_mshrs.add(mshr_addr, mf);
+    if (m_config.m_defer_hit_response) pin_response(mf, cache_index);
     m_extra_mf_fields[mf] = extra_mf_fields(
         mshr_addr, mf->get_addr(), cache_index, mf->get_data_size(), m_config);
     mf->set_data_size(m_config.get_atom_sz());
@@ -1879,8 +1948,17 @@ enum cache_request_status read_only_cache::access(
   enum cache_request_status cache_status = RESERVATION_FAIL;
 
   if (status == HIT) {
-    cache_status = m_tag_array->access(block_addr, time, cache_index,
-                                       mf);  // update LRU state
+    if (m_config.m_defer_hit_response && hit_response_queue_full()) {
+      cache_status = RESERVATION_FAIL;
+      m_stats.inc_fail_stats(mf->get_access_type(), HIT_RESPONSE_QUEUE_FULL,
+                             mf->get_streamID());
+    } else {
+      cache_status = m_tag_array->access(block_addr, time, cache_index,
+                                         mf);  // update LRU state
+      if (m_config.m_defer_hit_response && cache_status == HIT) {
+        enqueue_hit_response(mf, cache_index);
+      }
+    }
   } else if (status != RESERVATION_FAIL) {
     if (!miss_queue_full(0)) {
       bool do_miss = false;
@@ -1896,7 +1974,7 @@ enum cache_request_status read_only_cache::access(
                              mf->get_streamID());
     }
   } else {
-    m_stats.inc_fail_stats(mf->get_access_type(), LINE_ALLOC_FAIL,
+    m_stats.inc_fail_stats(mf->get_access_type(), m_tag_array->last_fail_reason(),
                            mf->get_streamID());
   }
 
@@ -1921,6 +1999,14 @@ enum cache_request_status data_cache::process_tag_probe(
   // options. Function pointers were used to avoid many long conditional
   // branches resulting from many cache configuration options.
   cache_request_status access_status = probe_status;
+  if (probe_status == HIT && m_config.m_defer_hit_response &&
+      hit_response_queue_full()) {
+    m_stats.inc_fail_stats(mf->get_access_type(), HIT_RESPONSE_QUEUE_FULL,
+                           mf->get_streamID());
+    m_bandwidth_management.use_data_port(mf, RESERVATION_FAIL, events);
+    return RESERVATION_FAIL;
+  }
+
   if (wr) {  // Write
     if (probe_status == HIT) {
       access_status =
@@ -1933,7 +2019,7 @@ enum cache_request_status data_cache::process_tag_probe(
     } else {
       // the only reason for reservation fail here is LINE_ALLOC_FAIL (i.e all
       // lines are reserved)
-      m_stats.inc_fail_stats(mf->get_access_type(), LINE_ALLOC_FAIL,
+      m_stats.inc_fail_stats(mf->get_access_type(), m_tag_array->last_fail_reason(),
                              mf->get_streamID());
     }
   } else {  // Read
@@ -1946,11 +2032,15 @@ enum cache_request_status data_cache::process_tag_probe(
     } else {
       // the only reason for reservation fail here is LINE_ALLOC_FAIL (i.e all
       // lines are reserved)
-      m_stats.inc_fail_stats(mf->get_access_type(), LINE_ALLOC_FAIL,
+      m_stats.inc_fail_stats(mf->get_access_type(), m_tag_array->last_fail_reason(),
                              mf->get_streamID());
     }
   }
 
+  if (probe_status == HIT && m_config.m_defer_hit_response &&
+      access_status == HIT) {
+    enqueue_hit_response(mf, cache_index);
+  }
   m_bandwidth_management.use_data_port(mf, access_status, events);
   return access_status;
 }

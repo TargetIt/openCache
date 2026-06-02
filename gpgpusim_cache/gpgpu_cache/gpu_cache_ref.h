@@ -64,6 +64,8 @@ enum cache_reservation_fail_reason {
   MSHR_ENRTY_FAIL,
   MSHR_MERGE_ENRTY_FAIL,
   MSHR_RW_PENDING,
+  LINE_PINNED_FAIL,
+  HIT_RESPONSE_QUEUE_FULL,
   NUM_CACHE_RESERVATION_FAIL_STATUS
 };
 
@@ -165,6 +167,10 @@ struct cache_block_t {
   virtual void set_m_readable(bool readable,
                               mem_access_sector_mask_t sector_mask) = 0;
   virtual bool is_readable(mem_access_sector_mask_t sector_mask) = 0;
+  virtual void pin() = 0;
+  virtual void unpin() = 0;
+  virtual unsigned get_pending_response_count() const = 0;
+  virtual bool is_pinned() const = 0;
   virtual void print_status() = 0;
   virtual ~cache_block_t() {}
 
@@ -182,6 +188,7 @@ struct line_cache_block : public cache_block_t {
     m_set_modified_on_fill = false;
     m_set_readable_on_fill = false;
     m_readable = true;
+    m_pending_response_count = 0;
   }
   void allocate(new_addr_type tag, new_addr_type block_addr, unsigned time,
                 mem_access_sector_mask_t sector_mask) {
@@ -195,6 +202,7 @@ struct line_cache_block : public cache_block_t {
     m_set_modified_on_fill = false;
     m_set_readable_on_fill = false;
     m_set_byte_mask_on_fill = false;
+    m_pending_response_count = 0;
   }
   virtual void fill(unsigned time, mem_access_sector_mask_t sector_mask,
                     mem_access_byte_mask_t byte_mask) {
@@ -268,6 +276,15 @@ struct line_cache_block : public cache_block_t {
   virtual bool is_readable(mem_access_sector_mask_t sector_mask) {
     return m_readable;
   }
+  virtual void pin() { ++m_pending_response_count; }
+  virtual void unpin() {
+    assert(m_pending_response_count > 0);
+    --m_pending_response_count;
+  }
+  virtual unsigned get_pending_response_count() const {
+    return m_pending_response_count;
+  }
+  virtual bool is_pinned() const { return m_pending_response_count != 0; }
   virtual void print_status() {
     printf("m_block_addr is %llu, status = %u\n", m_block_addr, m_status);
   }
@@ -282,6 +299,7 @@ struct line_cache_block : public cache_block_t {
   bool m_set_readable_on_fill;
   bool m_set_byte_mask_on_fill;
   bool m_readable;
+  unsigned m_pending_response_count;
   mem_access_byte_mask_t m_dirty_byte_mask;
 };
 
@@ -302,6 +320,7 @@ struct sector_cache_block : public cache_block_t {
     m_line_alloc_time = 0;
     m_line_last_access_time = 0;
     m_line_fill_time = 0;
+    m_pending_response_count = 0;
     m_dirty_byte_mask.reset();
   }
 
@@ -476,6 +495,15 @@ struct sector_cache_block : public cache_block_t {
     unsigned sidx = get_sector_index(sector_mask);
     return m_readable[sidx];
   }
+  virtual void pin() { ++m_pending_response_count; }
+  virtual void unpin() {
+    assert(m_pending_response_count > 0);
+    --m_pending_response_count;
+  }
+  virtual unsigned get_pending_response_count() const {
+    return m_pending_response_count;
+  }
+  virtual bool is_pinned() const { return m_pending_response_count != 0; }
 
   virtual unsigned get_modified_size() {
     unsigned modified = 0;
@@ -503,6 +531,7 @@ struct sector_cache_block : public cache_block_t {
   bool m_set_readable_on_fill[SECTOR_CHUNCK_SIZE];
   bool m_set_byte_mask_on_fill;
   bool m_readable[SECTOR_CHUNCK_SIZE];
+  unsigned m_pending_response_count;
   mem_access_byte_mask_t m_dirty_byte_mask;
 
   unsigned get_sector_index(mem_access_sector_mask_t sector_mask) {
@@ -565,6 +594,8 @@ class cache_config {
     m_config_stringPrefL1 = NULL;
     m_config_stringPrefShared = NULL;
     m_data_port_width = 0;
+    m_defer_hit_response = false;
+    m_hit_response_queue_size = 16;
     m_set_index_function = LINEAR_SET_FUNCTION;
     m_is_streaming = false;
     m_wr_percent = 0;
@@ -850,6 +881,14 @@ class cache_config {
   }
   write_policy_t get_write_policy() { return m_write_policy; }
   unsigned get_data_port_width() const { return m_data_port_width; }
+  bool defer_hit_response() const { return m_defer_hit_response; }
+  unsigned get_hit_response_queue_size() const {
+    return m_hit_response_queue_size;
+  }
+  void set_defer_hit_response(bool enable) { m_defer_hit_response = enable; }
+  void set_hit_response_queue_size(unsigned entries) {
+    m_hit_response_queue_size = entries;
+  }
 
  protected:
   void exit_parse_error() {
@@ -895,6 +934,8 @@ class cache_config {
   };
   unsigned m_result_fifo_entries;
   unsigned m_data_port_width;  //< number of byte the cache can access per cycle
+  bool m_defer_hit_response;
+  unsigned m_hit_response_queue_size;
   enum set_index_function
       m_set_index_function;  // Hash, linear, or custom set index function
 
@@ -988,6 +1029,9 @@ class tag_array {
   void add_pending_line(mem_fetch *mf);
   void remove_pending_line(mem_fetch *mf);
   void inc_dirty() { m_dirty++; }
+  enum cache_reservation_fail_reason last_fail_reason() const {
+    return m_last_fail_reason;
+  }
 
  protected:
   // This constructor is intended for use only from derived classes that wish to
@@ -1009,6 +1053,7 @@ class tag_array {
   unsigned m_res_fail;
   unsigned m_sector_miss;
   unsigned m_dirty;
+  mutable enum cache_reservation_fail_reason m_last_fail_reason;
 
   // performance counters for calculating the amount of misses within a time
   // window
@@ -1325,11 +1370,12 @@ class baseline_cache : public cache_t {
   void fill(mem_fetch *mf, unsigned time);
   /// Checks if mf is waiting to be filled by lower memory level
   bool waiting_for_fill(mem_fetch *mf);
-  /// Are any (accepted) accesses that had to wait for memory now ready? (does
-  /// not include accesses that "HIT")
-  bool access_ready() const { return m_mshrs.access_ready(); }
-  /// Pop next ready access (does not include accesses that "HIT")
-  mem_fetch *next_access() { return m_mshrs.next_access(); }
+  /// Are any accepted accesses ready to be returned?
+  bool access_ready() const {
+    return !m_ready_response_queue.empty() || m_mshrs.access_ready();
+  }
+  /// Pop next ready access.
+  mem_fetch *next_access();
   // flash invalidate all entries in cache
   void flush() { m_tag_array->flush(); }
   void invalidate() { m_tag_array->invalidate(); }
@@ -1438,6 +1484,17 @@ class baseline_cache : public cache_t {
 
   extra_mf_fields_lookup m_extra_mf_fields;
 
+  struct delayed_response_entry {
+    delayed_response_entry(mem_fetch *mf, unsigned cycles)
+        : m_mf(mf), m_remaining_cycles(cycles) {}
+    mem_fetch *m_mf;
+    unsigned m_remaining_cycles;
+  };
+  std::list<delayed_response_entry> m_hit_response_queue;
+  std::list<mem_fetch *> m_ready_response_queue;
+  typedef std::map<mem_fetch *, unsigned> pending_response_index_lookup;
+  pending_response_index_lookup m_pending_response_indices;
+
   cache_stats m_stats;
 
   /// Checks whether this request can be handled on this cycle. num_miss equals
@@ -1445,6 +1502,14 @@ class baseline_cache : public cache_t {
   bool miss_queue_full(unsigned num_miss) {
     return ((m_miss_queue.size() + num_miss) >= m_config.m_miss_queue_size);
   }
+  bool hit_response_queue_full() const {
+    return m_config.m_defer_hit_response &&
+           m_hit_response_queue.size() >= m_config.m_hit_response_queue_size;
+  }
+  unsigned hit_response_latency(mem_fetch *mf) const;
+  void enqueue_hit_response(mem_fetch *mf, unsigned cache_index);
+  void pin_response(mem_fetch *mf, unsigned cache_index);
+  void unpin_response(mem_fetch *mf);
   /// Read miss handler without writeback
   void send_read_request(new_addr_type addr, new_addr_type block_addr,
                          unsigned cache_index, mem_fetch *mf, unsigned time,
