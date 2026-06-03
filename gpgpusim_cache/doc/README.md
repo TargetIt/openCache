@@ -43,15 +43,38 @@ hierarchical stats aggregation, zero cache logic impact).
 
 ## Files
 
+### Compiled (standalone reference build)
+
 | File | Origin | Modified? |
 |------|--------|-----------|
-| `gpgpu_cache/gpu-cache.h` | GPGPU-Sim `src/gpgpu-sim/gpu-cache.h` | **No** — original preserved |
-| `gpgpu_cache/gpu-cache.cc` | GPGPU-Sim `src/gpgpu-sim/gpu-cache.cc` | **No** — original preserved |
 | `gpgpu_cache/gpu_cache_ref.h` | Derived from `gpu-cache.h` | **Only `#include` lines changed** |
 | `gpgpu_cache/gpu_cache_ref.cc` | Derived from `gpu-cache.cc` | **Only `#include` + 3 stub function bodies** |
 | `gpgpu_cache/gpgpu_stubs.h` | Written for this reference | Provides GPGPU-Sim dependencies |
+| `gpgpu_cache/data_store.h` | GPGPU-Sim `data_store.h` | **No** — original preserved |
+| `gpgpu_cache/memory_system.h` | GPGPU-Sim `memory_system.h` | **No** — original preserved |
 | `test/test_main.cc` | Written for this reference | 13 tests covering all cache types |
+| `test/test_cache_whitebox.cc` | Written for this reference | 116 deep whitebox tests |
+| `test/test_scenario.cc` | Written for this reference | 10 scenario integration tests |
+| `test/test_death.cc` | Written for this reference | 16 config parsing death tests |
 | `run.sh` | One-click build & test script | |
+| `CMakeLists.txt` | CMake build config | |
+| `coverage.sh` | Coverage report script | |
+
+### Preserved originals (`gpgpu_cache/reference-only-originals/`) — not compiled
+
+These are the **UNMODIFIED** GPGPU-Sim source files, kept solely as a correctness baseline.
+They are never compiled into the standalone reference build.
+
+| File | Origin |
+|------|--------|
+| `gpu-cache.h` | GPGPU-Sim `src/gpgpu-sim/gpu-cache.h` |
+| `gpu-cache.cc` | GPGPU-Sim `src/gpgpu-sim/gpu-cache.cc` |
+| `gpu-misc.h` / `gpu-misc.cc` | GPGPU-Sim `src/gpgpu-sim/gpu-misc.*` |
+| `hashing.h` / `hashing.cc` | GPGPU-Sim hashing utilities |
+| `addrdec.h` / `addrdec.cc` | GPGPU-Sim address decoder |
+| `mem_fetch.h` / `mem_fetch_status.tup` | GPGPU-Sim memory fetch types |
+| `abstract_hardware_model.h` | GPGPU-Sim hardware model types |
+| `delayqueue.h` | GPGPU-Sim delay queue |
 
 ## Cache Types Provided
 
