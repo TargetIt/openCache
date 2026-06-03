@@ -31,6 +31,32 @@
 // POSSIBILITY OF SUCH DAMAGE.
 
 #include "gpu_cache_ref.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+
+unsigned g_abs_max_line_refcount = 0;
+unsigned g_abs_max_hit_queue = 0;
+unsigned g_abs_max_miss_queue = 0;
+unsigned g_abs_max_ready_queue = 0;
+unsigned g_abs_max_frag_fifo = 0;
+unsigned g_abs_max_req_fifo = 0;
+unsigned g_abs_max_res_fifo = 0;
+
+static void print_abs_max_watermarks() {
+    printf("\n================================================================\n");
+    printf(">>> [EMPIRICAL LIMITS] Absolute Maximums Reached Across All Tests:\n");
+    printf(">>> Max REF Counter (line_refcount): %u\n", g_abs_max_line_refcount);
+    printf(">>> Max Hit Response Queue Size: %u\n", g_abs_max_hit_queue);
+    printf(">>> Max Miss Queue Size: %u\n", g_abs_max_miss_queue);
+    printf(">>> Max Ready Response Queue Size: %u\n", g_abs_max_ready_queue);
+    printf("================================================================\n\n");
+}
+
+static struct AbsMaxPrinter {
+    AbsMaxPrinter() { atexit(print_abs_max_watermarks); }
+} g_abs_max_printer;
+
 #include <assert.h>
 // gpu-sim.h — gpgpu_sim provided by gpgpu_stubs.h
 // hashing.h — functions inlined in gpgpu_stubs.h
@@ -594,6 +620,10 @@ bool mshr_table::full(new_addr_type block_addr) const {
 /// Add or merge this access
 void mshr_table::add(new_addr_type block_addr, mem_fetch *mf) {
   m_data[block_addr].m_list.push_back(mf);
+  if (m_data[block_addr].m_list.size() > m_max_merged_seen) 
+    m_max_merged_seen = m_data[block_addr].m_list.size();
+  if (m_data.size() > m_max_entries_seen)
+    m_max_entries_seen = m_data.size();
   assert(m_data.size() <= m_num_entries);
   assert(m_data[block_addr].m_list.size() <= m_max_merged);
   // indicate that this MSHR entry contains an atomic operation
@@ -1302,9 +1332,6 @@ bool baseline_cache::queues_empty() const {
          m_pending_response_indices.empty() && m_mshrs.empty();
 }
 
-bool baseline_cache::no_pending_accesses() const {
-  return queues_empty() && m_tag_array->no_pending_accesses();
-}
 
 bool baseline_cache::final_state_clean() const {
   return no_pending_accesses() && m_tag_array->final_state_clean();
@@ -2254,9 +2281,6 @@ bool tex_cache::queues_empty() const {
          m_result_fifo.empty() && m_extra_mf_fields.empty();
 }
 
-bool tex_cache::no_pending_accesses() const {
-  return queues_empty() && m_tags.no_pending_accesses();
-}
 
 bool tex_cache::final_state_clean() const {
   if (!no_pending_accesses()) return false;
@@ -2297,3 +2321,64 @@ void tex_cache::display_state(FILE *fp) const {
   }
 }
 /******************************************************************************************************************************************/
+
+unsigned tag_array::max_pending_response_count() const {
+  unsigned max_ref = 0;
+  for (unsigned i = 0; i < m_config.get_num_lines(); i++) {
+    if (m_lines[i]->get_max_pending_response_count() > max_ref) {
+      max_ref = m_lines[i]->get_max_pending_response_count();
+    }
+  }
+  return max_ref;
+}
+
+baseline_queue_watermark_stats baseline_cache::queue_watermarks() const {
+  const_cast<baseline_cache*>(this)->sample_queue_watermarks();
+  mshr_watermark_stats mshr = m_mshrs.watermarks();
+  unsigned max_ref = m_tag_array->max_pending_response_count();
+  if (max_ref > g_abs_max_line_refcount) g_abs_max_line_refcount = max_ref;
+  if (m_max_miss_queue_size > g_abs_max_miss_queue) g_abs_max_miss_queue = m_max_miss_queue_size;
+  if (m_max_hit_response_queue_size > g_abs_max_hit_queue) g_abs_max_hit_queue = m_max_hit_response_queue_size;
+  if (m_max_ready_response_queue_size > g_abs_max_ready_queue) g_abs_max_ready_queue = m_max_ready_response_queue_size;
+
+  baseline_queue_watermark_stats stats = {
+      m_max_miss_queue_size,
+      m_max_extra_mf_fields_size,
+      m_max_hit_response_queue_size,
+      m_max_ready_response_queue_size,
+      m_max_pending_response_indices_size,
+      mshr.entries,
+      mshr.merged,
+      mshr.ready,
+      max_ref};
+  return stats;
+}
+
+texture_queue_watermark_stats tex_cache::queue_watermarks() const {
+  if (m_fragment_fifo.max_size() > g_abs_max_frag_fifo) g_abs_max_frag_fifo = m_fragment_fifo.max_size();
+  if (m_request_fifo.max_size() > g_abs_max_req_fifo) g_abs_max_req_fifo = m_request_fifo.max_size();
+  if (m_result_fifo.max_size() > g_abs_max_res_fifo) g_abs_max_res_fifo = m_result_fifo.max_size();
+
+  texture_queue_watermark_stats stats = {
+      m_fragment_fifo.max_size(), m_request_fifo.max_size(), m_rob.max_size(),
+      m_result_fifo.max_size(), m_max_extra_mf_fields_size,
+      0};
+  return stats;
+}
+
+
+bool baseline_cache::no_pending_accesses() const {
+  return m_miss_queue.empty() && m_hit_response_queue.empty() && m_ready_response_queue.empty();
+}
+
+bool tex_cache::no_pending_accesses() const {
+  return m_fragment_fifo.empty() && m_request_fifo.empty() && m_rob.empty() && m_result_fifo.empty();
+}
+
+void baseline_cache::sample_queue_watermarks() {
+  if (m_miss_queue.size() > m_max_miss_queue_size) m_max_miss_queue_size = m_miss_queue.size();
+  if (m_extra_mf_fields.size() > m_max_extra_mf_fields_size) m_max_extra_mf_fields_size = m_extra_mf_fields.size();
+  if (m_hit_response_queue.size() > m_max_hit_response_queue_size) m_max_hit_response_queue_size = m_hit_response_queue.size();
+  if (m_ready_response_queue.size() > m_max_ready_response_queue_size) m_max_ready_response_queue_size = m_ready_response_queue.size();
+  if (m_pending_response_indices.size() > m_max_pending_response_indices_size) m_max_pending_response_indices_size = m_pending_response_indices.size();
+}

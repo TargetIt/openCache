@@ -298,6 +298,20 @@ final check 不提供强制清空内部状态的后门。白盒测试通过 RAII
 
 故障注入类用例如果刻意制造下游背压或未完成请求，必须在断言完成后恢复可收敛条件，让 guard 能通过正常路径完成收尾；不能用测试后门直接清空内部状态。
 
+### Watermark 统计设计
+
+为让 refcount 和内部 queue/FIFO 覆盖率可度量，当前实现新增正式 max watermark 统计：
+
+| 对象 | 接口 | 统计范围 |
+|------|------|----------|
+| `cache_block_t` | `get_pending_response_count()` / `get_max_pending_response_count()` | 当前 refcount 和 block 生命周期内最大 refcount |
+| `mshr_table` | `watermarks()` | MSHR entry 数、单 entry merge 深度、ready response 队列最大水位 |
+| `baseline_cache` | `queue_watermarks()` | miss queue、extra fields、hit response queue、ready response queue、pending response index、MSHR 水位、line refcount 最大值 |
+| `tex_cache` | `queue_watermarks()` | fragment FIFO、request FIFO、ROB、result FIFO、extra fields、line refcount 最大值 |
+| `simple_mem_interface` | `max_queue_occupancy` | 测试侧外部 memory queue 最大水位 |
+
+白盒 testcase 对这些 watermark 做直接断言，而不是只依赖 final drain 后为空。当前已断言的代表性最大水位包括：hit response queue `1/1` 满队列、same-line hit refcount `2`、MSHR merge depth `2`、texture fragment/request/ROB `2`、texture result FIFO `1/1` 满队列、外部 memory queue `2`。
+
 ### 设计状态
 
-已进入代码实现并通过默认回归。2026-06-02 当前结果：`./run.sh` 通过 unit `13/13`、scenario `86/86 checks`、whitebox `40/40`、death `16/16`；`./coverage.sh coverage-final-guards` 总覆盖率 Region `56.79%`、Function `74.48%`、Line `70.64%`、Branch `60.57%`。
+已进入代码实现并通过默认回归。2026-06-02 当前结果：`./run.sh` 通过 unit `13/13`、scenario `86/86 checks`、whitebox `41/41`、death `16/16`；`./coverage.sh coverage-refcount-watermark` 总覆盖率 Region `57.63%`、Function `75.84%`、Line `71.80%`、Branch `61.41%`。

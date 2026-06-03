@@ -170,6 +170,7 @@ struct cache_block_t {
   virtual void pin() = 0;
   virtual void unpin() = 0;
   virtual unsigned get_pending_response_count() const = 0;
+  virtual unsigned get_max_pending_response_count() const = 0;
   virtual bool is_pinned() const = 0;
   virtual void print_status() = 0;
   virtual ~cache_block_t() {}
@@ -189,6 +190,7 @@ struct line_cache_block : public cache_block_t {
     m_set_readable_on_fill = false;
     m_readable = true;
     m_pending_response_count = 0;
+    m_max_pending_response_count = 0;
   }
   void allocate(new_addr_type tag, new_addr_type block_addr, unsigned time,
                 mem_access_sector_mask_t sector_mask) {
@@ -203,6 +205,7 @@ struct line_cache_block : public cache_block_t {
     m_set_readable_on_fill = false;
     m_set_byte_mask_on_fill = false;
     m_pending_response_count = 0;
+    m_max_pending_response_count = 0;
   }
   virtual void fill(unsigned time, mem_access_sector_mask_t sector_mask,
                     mem_access_byte_mask_t byte_mask) {
@@ -276,13 +279,20 @@ struct line_cache_block : public cache_block_t {
   virtual bool is_readable(mem_access_sector_mask_t sector_mask) {
     return m_readable;
   }
-  virtual void pin() { ++m_pending_response_count; }
+  virtual void pin() {
+    ++m_pending_response_count;
+    if (m_pending_response_count > m_max_pending_response_count)
+      m_max_pending_response_count = m_pending_response_count;
+  }
   virtual void unpin() {
     assert(m_pending_response_count > 0);
     --m_pending_response_count;
   }
   virtual unsigned get_pending_response_count() const {
     return m_pending_response_count;
+  }
+  virtual unsigned get_max_pending_response_count() const {
+    return m_max_pending_response_count;
   }
   virtual bool is_pinned() const { return m_pending_response_count != 0; }
   virtual void print_status() {
@@ -300,6 +310,7 @@ struct line_cache_block : public cache_block_t {
   bool m_set_byte_mask_on_fill;
   bool m_readable;
   unsigned m_pending_response_count;
+  unsigned m_max_pending_response_count;
   mem_access_byte_mask_t m_dirty_byte_mask;
 };
 
@@ -321,6 +332,7 @@ struct sector_cache_block : public cache_block_t {
     m_line_last_access_time = 0;
     m_line_fill_time = 0;
     m_pending_response_count = 0;
+    m_max_pending_response_count = 0;
     m_dirty_byte_mask.reset();
   }
 
@@ -495,13 +507,20 @@ struct sector_cache_block : public cache_block_t {
     unsigned sidx = get_sector_index(sector_mask);
     return m_readable[sidx];
   }
-  virtual void pin() { ++m_pending_response_count; }
+  virtual void pin() {
+    ++m_pending_response_count;
+    if (m_pending_response_count > m_max_pending_response_count)
+      m_max_pending_response_count = m_pending_response_count;
+  }
   virtual void unpin() {
     assert(m_pending_response_count > 0);
     --m_pending_response_count;
   }
   virtual unsigned get_pending_response_count() const {
     return m_pending_response_count;
+  }
+  virtual unsigned get_max_pending_response_count() const {
+    return m_max_pending_response_count;
   }
   virtual bool is_pinned() const { return m_pending_response_count != 0; }
 
@@ -532,6 +551,7 @@ struct sector_cache_block : public cache_block_t {
   bool m_set_byte_mask_on_fill;
   bool m_readable[SECTOR_CHUNCK_SIZE];
   unsigned m_pending_response_count;
+  unsigned m_max_pending_response_count;
   mem_access_byte_mask_t m_dirty_byte_mask;
 
   unsigned get_sector_index(mem_access_sector_mask_t sector_mask) {
@@ -1014,6 +1034,7 @@ class tag_array {
 
   unsigned size() const { return m_config.get_num_lines(); }
   cache_block_t *get_block(unsigned idx) { return m_lines[idx]; }
+  unsigned max_pending_response_count() const;
   bool no_pending_accesses() const;
   bool final_state_clean() const;
 
@@ -1072,11 +1093,20 @@ class tag_array {
   line_table pending_lines;
 };
 
+struct mshr_watermark_stats {
+  unsigned entries;
+  unsigned merged;
+  unsigned ready;
+};
+
 class mshr_table {
  public:
   mshr_table(unsigned num_entries, unsigned max_merged)
       : m_num_entries(num_entries),
-        m_max_merged(max_merged)
+        m_max_merged(max_merged),
+        m_max_entries_seen(0),
+        m_max_merged_seen(0),
+        m_max_ready_seen(0)
 #if (tr1_hash_map_ismap == 0)
         ,
         m_data(2 * num_entries)
@@ -1097,6 +1127,11 @@ class mshr_table {
   /// Returns true if ready accesses exist
   bool access_ready() const { return !m_current_response.empty(); }
   bool empty() const { return m_data.empty() && m_current_response.empty(); }
+  mshr_watermark_stats watermarks() const {
+    mshr_watermark_stats stats = {m_max_entries_seen, m_max_merged_seen,
+                                  m_max_ready_seen};
+    return stats;
+  }
   /// Returns next ready access
   mem_fetch *next_access();
   void display(FILE *fp) const;
@@ -1115,6 +1150,9 @@ class mshr_table {
   // merged requests
   const unsigned m_num_entries;
   const unsigned m_max_merged;
+  unsigned m_max_entries_seen;
+  unsigned m_max_merged_seen;
+  unsigned m_max_ready_seen;
 
   struct mshr_entry {
     std::list<mem_fetch *> m_list;
@@ -1190,6 +1228,27 @@ struct cache_sub_stats {
   }
 
   void print_port_stats(FILE *fout, const char *cache_name) const;
+};
+
+struct baseline_queue_watermark_stats {
+  unsigned miss_queue;
+  unsigned extra_mf_fields;
+  unsigned hit_response_queue;
+  unsigned ready_response_queue;
+  unsigned pending_response_indices;
+  unsigned mshr_entries;
+  unsigned mshr_merged;
+  unsigned mshr_ready;
+  unsigned line_refcount;
+};
+
+struct texture_queue_watermark_stats {
+  unsigned fragment_fifo;
+  unsigned request_fifo;
+  unsigned rob;
+  unsigned result_fifo;
+  unsigned extra_mf_fields;
+  unsigned line_refcount;
 };
 
 // Used for collecting AerialVision per-window statistics
@@ -1382,6 +1441,7 @@ class baseline_cache : public cache_t {
   bool queues_empty() const;
   bool no_pending_accesses() const;
   bool final_state_clean() const;
+  baseline_queue_watermark_stats queue_watermarks() const;
   // flash invalidate all entries in cache
   void flush() { m_tag_array->flush(); }
   void invalidate() { m_tag_array->invalidate(); }
@@ -1500,6 +1560,12 @@ class baseline_cache : public cache_t {
   std::list<mem_fetch *> m_ready_response_queue;
   typedef std::map<mem_fetch *, unsigned> pending_response_index_lookup;
   pending_response_index_lookup m_pending_response_indices;
+  unsigned m_max_miss_queue_size = 0;
+  unsigned m_max_extra_mf_fields_size = 0;
+  unsigned m_max_hit_response_queue_size = 0;
+  unsigned m_max_ready_response_queue_size = 0;
+  unsigned m_max_pending_response_indices_size = 0;
+  unsigned m_max_line_refcount = 0;
 
   cache_stats m_stats;
 
@@ -1516,6 +1582,7 @@ class baseline_cache : public cache_t {
   void enqueue_hit_response(mem_fetch *mf, unsigned cache_index);
   void pin_response(mem_fetch *mf, unsigned cache_index);
   void unpin_response(mem_fetch *mf);
+  void sample_queue_watermarks();
   /// Read miss handler without writeback
   void send_read_request(new_addr_type addr, new_addr_type block_addr,
                          unsigned cache_index, mem_fetch *mf, unsigned time,
@@ -1873,6 +1940,7 @@ class tex_cache : public cache_t {
   bool queues_empty() const;
   bool no_pending_accesses() const;
   bool final_state_clean() const;
+  texture_queue_watermark_stats queue_watermarks() const;
   void display_state(FILE *fp) const;
 
   // accessors for cache bandwidth availability - stubs for now
@@ -1944,6 +2012,7 @@ class tex_cache : public cache_t {
     fifo(unsigned size) {
       m_size = size;
       m_num = 0;
+      m_max_num = 0;
       m_head = 0;
       m_tail = 0;
       m_data = new T[size];
@@ -1951,6 +2020,7 @@ class tex_cache : public cache_t {
     bool full() const { return m_num == m_size; }
     bool empty() const { return m_num == 0; }
     unsigned size() const { return m_num; }
+    unsigned max_size() const { return m_max_num; }
     unsigned capacity() const { return m_size; }
     unsigned push(const T &e) {
       assert(!full());
@@ -1980,6 +2050,7 @@ class tex_cache : public cache_t {
     void inc_head() {
       m_head = (m_head + 1) % m_size;
       m_num++;
+      if (m_num > m_max_num) m_max_num = m_num;
     }
     void inc_tail() {
       assert(m_num > 0);
@@ -1990,6 +2061,7 @@ class tex_cache : public cache_t {
     unsigned m_head;  // next entry goes here
     unsigned m_tail;  // oldest entry found here
     unsigned m_num;   // how many in fifo?
+    unsigned m_max_num;
     unsigned m_size;  // maximum number of entries in fifo
     T *m_data;
   };
@@ -2000,6 +2072,7 @@ class tex_cache : public cache_t {
   fifo<rob_entry> m_rob;
   data_block *m_cache;
   fifo<mem_fetch *> m_result_fifo;  // next completed texture fetch
+  unsigned m_max_extra_mf_fields_size = 0;
 
   mem_fetch_interface *m_memport;
   enum mem_fetch_status m_request_queue_status;

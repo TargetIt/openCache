@@ -68,7 +68,7 @@ while (!mem.queue.empty()) {
 
 - unit：`13/13`
 - scenario：`86/86 checks`
-- whitebox：`40/40`
+- whitebox：`41/41`
 - death：`16/16`
 
 ## BUG-20260602-002 final check 发现 tag_array::invalidate() 早退导致 line 未回初始态
@@ -141,13 +141,13 @@ void tag_array::invalidate() {
 
 ```bash
 ./run.sh
-./coverage.sh coverage-final-guards
+./coverage.sh coverage-refcount-watermark
 ```
 
 结果通过：
 
 - unit：`13/13`
 - scenario：`86/86 checks`
-- whitebox：`40/40`
+- whitebox：`41/41`
 - death：`16/16`
-- coverage total：Region `56.79%`，Function `74.48%`，Line `70.64%`，Branch `60.57%`
+- coverage total：Region `57.63%`，Function `75.84%`，Line `71.80%`，Branch `61.41%`

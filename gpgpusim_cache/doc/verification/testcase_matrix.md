@@ -58,6 +58,9 @@
 | TC-HITLAT-020 | F-HITLAT-015 | unit | Implemented | `test/test_cache_whitebox.cc` | DataStore hit accepted 时快照语义被文档和场景测试固定，不误当成 coherence 行为 |
 | TC-FINAL-001 | F-FINAL-001 | unit | Implemented | `test/test_cache_whitebox.cc` | 每个白盒用例中创建的 baseline cache 派生对象、tag_array、mshr_table 均由 final guard 收尾检查 |
 | TC-FINAL-002 | F-FINAL-002 | unit | Implemented | `test/test_cache_whitebox.cc` | 每个白盒用例中创建的 texture cache 均由 final guard 收尾检查 |
+| TC-WATERMARK-001 | F-WATERMARK-001 | unit | Implemented | `test/test_cache_whitebox.cc` | baseline `queue_watermarks()` 断言 hit/ready response queue、pending response index、line refcount、外部 mem queue 最大水位 |
+| TC-WATERMARK-002 | F-WATERMARK-002 | unit | Implemented | `test/test_cache_whitebox.cc` | MSHR `watermarks()` 断言 entry、merge、ready 最大水位 |
+| TC-WATERMARK-003 | F-WATERMARK-003 | unit | Implemented | `test/test_cache_whitebox.cc` | texture `queue_watermarks()` 断言 fragment/request/result FIFO、ROB、extra fields、外部 mem queue 最大水位 |
 | TC-WR-001 | F-WR-001 | unit | Implemented | `test/test_cache_whitebox.cc` | WB hit 不产生 lower write |
 | TC-WR-002 | F-WR-002 | unit | Implemented | `test/test_cache_whitebox.cc` | WT hit 产生 WRITE_REQUEST_SENT |
 | TC-WR-003 | F-WR-003 | unit | Implemented | `test/test_cache_whitebox.cc` | WE hit 后读同地址 miss |
@@ -84,7 +87,7 @@
 | TC-PROP-002 | F-PROP-001 | property | Implemented | `test/test_cache_whitebox.cc` | 5-seed read-only 随机 trace 重复运行差分一致，校验 accesses/misses/res_fails 不变量 |
 | TC-PROP-003 | F-PROP-001 | property | Implemented | `test/test_cache_whitebox.cc` | 4-seed read/write 混合 trace 与无驱逐 oracle 对照，校验 hit/miss、per-window read/write hit 和重复运行一致性 |
 | TC-REG-001 | F-REG-001 | regression | Implemented | `run.sh` | 一键回归 unit/scenario/whitebox/death 全部通过 |
-| TC-COV-001 | F-COV-001 | coverage | Implemented | `coverage.sh` | 生成覆盖率报告；当前 line 70.64%、function 74.48%、branch 60.57%；death 子进程 abort 路径不计入 coverage；llvm-cov mismatch 诊断落盘并写入说明 |
+| TC-COV-001 | F-COV-001 | coverage | Implemented | `coverage.sh` | 生成覆盖率报告；当前 line 71.80%、function 75.84%、branch 61.41%；death 子进程 abort 路径不计入 coverage；llvm-cov mismatch 诊断落盘并写入说明 |
 
 ## 多角色检视记录
 
@@ -123,3 +126,6 @@
 | TC-HITLAT-020 | DataStore 快照语义 | hit accepted 后延迟期间同地址写 | 固化“读出即快照”的解释性场景 | 返回 accepted 时刻快照，非 coherence 测试 |
 | TC-FINAL-001 | baseline/read-only/data cache、tag_array、mshr_table；默认新模式 | 每个白盒用例中直接创建的对象 | RAII guard 在用例退出时 drain、pop ready，先检查 `no_pending_accesses()`/`empty()`，再 cleanup invalidate | invalidate 前 queue/MSHR/pending ref/refcount 清空；cleanup 后所有 line invalid/unpinned |
 | TC-FINAL-002 | texture cache；默认新模式 | 每个白盒用例中直接创建的 texture cache | RAII guard 在用例退出时 drain FIFO/ROB/result，先检查 `no_pending_accesses()`，再 cleanup invalidate | invalidate 前 FIFO/ROB/extra fields/refcount 清空；cleanup 后 tag/data block 回初始态 |
+| TC-WATERMARK-001 | baseline/read-only/data cache；默认新模式 | same-line hit、bounded hit queue、MSHR merge、write-evict pinned invalid | 读取 `baseline_cache::queue_watermarks()` 和 `simple_mem_interface::max_queue_occupancy` | hit response queue `1/1` 满、ready queue `2`、pending response index `2`、line refcount `2`、外部 mem queue `1` |
+| TC-WATERMARK-002 | MSHR table；默认新模式 | 两 entry、两 merge、ready response | 读取 `mshr_table::watermarks()` | entry max `2`、merge max `2`、ready max `1` |
+| TC-WATERMARK-003 | texture cache；默认新模式 | FIFO backpressure、result FIFO 满、乱序 fill | 读取 `tex_cache::queue_watermarks()` 和 `simple_mem_interface::max_queue_occupancy` | fragment/request/ROB max `2`、result FIFO max `1`、extra fields max `2`、外部 mem queue max `1` |

@@ -57,6 +57,9 @@
 | F-HITLAT-015 | DataStore snapshot timing | functional/风险 | hit accepted 时快照语义与延迟 token 返回不混淆 | TC-HITLAT-020 |
 | F-FINAL-001 | baseline/tag/MSHR final guard | 流程/白盒 | 每个白盒用例中创建的 baseline cache 派生对象、tag_array、mshr_table 在用例退出时自动收尾检查 | TC-FINAL-001 |
 | F-FINAL-002 | texture cache final guard | 流程/白盒 | 每个白盒用例中创建的 texture cache 在用例退出时自动收尾检查 | TC-FINAL-002 |
+| F-WATERMARK-001 | baseline queue/refcount watermark | 覆盖/白盒 | baseline cache 记录并上报 miss queue、extra fields、hit/ready response queue、pending response index、line refcount 最大水位 | TC-WATERMARK-001 |
+| F-WATERMARK-002 | MSHR watermark | 覆盖/白盒 | MSHR 记录并上报 entry 数、merge 深度、ready response 队列最大水位 | TC-WATERMARK-002 |
+| F-WATERMARK-003 | texture FIFO watermark | 覆盖/白盒 | texture cache 记录并上报 fragment FIFO、request FIFO、ROB、result FIFO、extra fields、外部 mem queue 最大水位 | TC-WATERMARK-003 |
 | F-WR-001 | write-back hit | 白盒 | dirty no lower write | TC-WR-001 |
 | F-WR-002 | write-through hit | 白盒 | WRITE_REQUEST_SENT | TC-WR-002 |
 | F-WR-003 | write-evict hit | 白盒 | write event + invalidation | TC-WR-003 |
@@ -108,3 +111,6 @@
 | F-HITLAT-015 | DataStore 快照语义；未来 payload 场景 | hit accepted 后延迟期间插入同地址写 | 固化读快照时机，token 延迟交付 | 返回 accepted 时刻快照，不误判为 coherence 行为 |
 | F-FINAL-001 | baseline/read-only/data cache、tag_array、mshr_table；默认新模式 | 每个白盒用例中直接创建的对象 | RAII guard 在用例退出时 drain、pop ready，先检查 queue/MSHR/pending ref/refcount 清空，再 cleanup invalidate | invalidate 前 `no_pending_accesses()==true` 或 `empty()==true`；cleanup 后 line invalid/unpinned，外部 mem queue 为空 |
 | F-FINAL-002 | texture cache；默认新模式 | 每个白盒用例中直接创建的 texture cache | RAII guard 在用例退出时 drain FIFO/ROB/result，先检查 FIFO/ROB/extra fields/refcount 清空，再 cleanup invalidate | invalidate 前 `no_pending_accesses()==true`；cleanup 后 tag/data block 回初始态 |
+| F-WATERMARK-001 | baseline/read-only/data cache；默认新模式 | hit queue 满/未满、same-line 多 hit、MSHR merge、write-evict pinned invalid | 在每个相关 testcase 中读取 `queue_watermarks()` | hit response queue `1/1` 满队列、ready queue `2`、pending response index `2`、line refcount `2` 被断言 |
+| F-WATERMARK-002 | MSHR table；默认新模式 | entry 数、merge 深度、ready response 队列 | 在 `mshr_capacity_order_raw` 中读取 `watermarks()` | entries `2`、merged `2`、ready `1` 被断言 |
+| F-WATERMARK-003 | texture cache；默认新模式 | miss/hit-reserved、backpressure、result FIFO 满、乱序 fill | 在 texture testcase 中读取 `queue_watermarks()` 和 `max_queue_occupancy` | fragment/request/ROB `2`、result FIFO `1/1`、extra fields `2`、外部 mem queue `1` 被断言 |

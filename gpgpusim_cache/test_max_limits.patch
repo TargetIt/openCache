@@ -1,0 +1,129 @@
+--- test/test_cache_whitebox.cc
++++ test/test_cache_whitebox.cc
+@@ -2313,6 +2313,115 @@
+     CHECK_TRUE(cache.final_state_clean());
+ }
+ 
++TEST(extreme_mshr_merge_refcount_spike)
++{
++    cache_config cfg = make_config("N:1:64:1,L:R:m:N:L,A:64:64,64");
++    cfg.set_defer_hit_response(true);
++    cfg.set_hit_response_queue_size(64);
++    
++    simple_mem_interface mem(128);
++    gpgpu_sim gpu;
++    read_only_cache cache("MaxMSHR", cfg, 0, 0, &mem, IN_L1C_MISS_QUEUE, OTHER_GPU_CACHE, &gpu);
++
++    mem_access_sector_mask_t sm; sm.set(0);
++    std::vector<mem_fetch*> mfs;
++    for (int i = 0; i < 64; ++i) {
++        mem_access_t acc(GLOBAL_ACC_R, 0x1000, 4, false, active_mask_t(), mem_access_byte_mask_t(), sm);
++        warp_inst_t inst;
++        mem_fetch* mf = new mem_fetch(acc, &inst, 0, 0, 0, 0, 0, NULL, 0);
++        mfs.push_back(mf);
++        std::list<cache_event> events;
++        enum cache_request_status s = cache.access(mf->get_addr(), mf, i, events);
++        CHECK_TRUE(s == MISS || s == HIT_RESERVED);
++        cache.cycle();
++    }
++    
++    baseline_queue_watermark_stats pre_fill = cache.queue_watermarks();
++    CHECK_EQ(pre_fill.mshr_merged, 63u);
++
++    CHECK_TRUE(!mem.queue.empty());
++    mem_fetch* fetch_req = mem.queue.front();
++    mem.queue.pop_front();
++    cache.fill(fetch_req, 100);
++    
++    baseline_queue_watermark_stats post_fill = cache.queue_watermarks();
++    CHECK_TRUE(post_fill.line_refcount >= 64u);
++
++    while (cache.access_ready()) cache.next_access();
++    for (auto mf : mfs) delete mf;
++}
++
++TEST(extreme_hit_queue_ready_queue_congestion)
++{
++    cache_config cfg = make_config("N:1:64:1,L:R:m:N:L,A:64:64,64");
++    cfg.m_data_port_width = 1; 
++    cfg.set_defer_hit_response(true);
++    cfg.set_hit_response_queue_size(64);
++    
++    simple_mem_interface mem(128);
++    gpgpu_sim gpu;
++    read_only_cache cache("MaxHitQ", cfg, 0, 0, &mem, IN_L1C_MISS_QUEUE, OTHER_GPU_CACHE, &gpu);
++
++    mem_access_sector_mask_t sm; sm.set(0);
++    mem_access_t acc_w(GLOBAL_ACC_R, 0x2000, 4, false, active_mask_t(), mem_access_byte_mask_t(), sm);
++    warp_inst_t inst;
++    mem_fetch* mf_w = new mem_fetch(acc_w, &inst, 0, 0, 0, 0, 0, NULL, 0);
++    std::list<cache_event> ev_w;
++    cache.access(mf_w->get_addr(), mf_w, 0, ev_w);
++    cache.cycle();
++    cache.fill(mem.queue.front(), 10);
++    mem.queue.pop_front();
++    cache.next_access();
++    
++    std::vector<mem_fetch*> mfs;
++    for (int i = 0; i < 64; ++i) {
++        mem_access_t acc(GLOBAL_ACC_R, 0x2000, 128, false, active_mask_t(), mem_access_byte_mask_t(), sm);
++        mem_fetch* mf = new mem_fetch(acc, &inst, 0, 0, 0, 0, 0, NULL, 0);
++        mfs.push_back(mf);
++        std::list<cache_event> events;
++        cache.access(mf->get_addr(), mf, 100+i, events);
++    }
++    
++    for (int i = 0; i < 10000; ++i) cache.cycle();
++    
++    baseline_queue_watermark_stats watermarks = cache.queue_watermarks();
++    CHECK_TRUE(watermarks.hit_response_queue >= 64u);
++    CHECK_TRUE(watermarks.ready_response_queue == 64u);
++    CHECK_TRUE(watermarks.line_refcount >= 64u);
++    
++    while (cache.access_ready()) cache.next_access();
++    for (auto mf : mfs) delete mf;
++    delete mf_w;
++}
++
++TEST(extreme_miss_queue_backpressure)
++{
++    cache_config cfg = make_config("N:64:64:1,L:R:m:N:L,A:64:64,64");
++    cfg.set_defer_hit_response(true);
++    cfg.set_hit_response_queue_size(64);
++    
++    simple_mem_interface mem(128);
++    gpgpu_sim gpu;
++    read_only_cache cache("MaxMissQ", cfg, 0, 0, &mem, IN_L1C_MISS_QUEUE, OTHER_GPU_CACHE, &gpu);
++
++    mem_access_sector_mask_t sm; sm.set(0);
++    std::vector<mem_fetch*> mfs;
++    for (int i = 0; i < 64; ++i) {
++        mem_access_t acc(GLOBAL_ACC_R, i * 64, 4, false, active_mask_t(), mem_access_byte_mask_t(), sm);
++        warp_inst_t inst;
++        mem_fetch* mf = new mem_fetch(acc, &inst, 0, 0, 0, 0, 0, NULL, 0);
++        mfs.push_back(mf);
++        std::list<cache_event> events;
++        cache.access(mf->get_addr(), mf, i, events);
++        cache.cycle();
++    }
++    
++    baseline_queue_watermark_stats watermarks = cache.queue_watermarks();
++    CHECK_EQ(watermarks.miss_queue, 64u);
++    
++    for (auto mf : mfs) delete mf;
++}
++
+ int main() {
+     printf("\n========== GPGPU-Sim Cache Deep Whitebox Test Suite ==========\n\n");
+ 
+@@ -2356,6 +2465,10 @@
+     RUN_TEST(hitlat_datastore_timing_token_only);
+     RUN_TEST(final_check_baseline_cache_returns_to_initial_state);
+     RUN_TEST(final_check_texture_cache_returns_to_initial_state);
++    
++    RUN_TEST(extreme_mshr_merge_refcount_spike);
++    RUN_TEST(extreme_hit_queue_ready_queue_congestion);
++    RUN_TEST(extreme_miss_queue_backpressure);
+ 
+     printf("\n========== Results: %d/%d tests passed ==========\n",
+            tests_passed, tests_run);

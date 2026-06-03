@@ -107,6 +107,7 @@
 | GPGPUSIM-HITLAT-011 | 将默认回归用例适配到新模式，修正 hit 后未 drain 就替换的旧同步假设 | 已完成 |
 | GPGPUSIM-HITLAT-012 | 增加 final check，可检查 baseline/texture cache 收尾后 queue/FIFO/MSHR/pending ref 和 line/data block 是否回初始态 | 已完成 |
 | GPGPUSIM-HITLAT-013 | 将 final check 升级为白盒用例对象级 RAII guard，覆盖每个直接创建的 cache/tag/MSHR 对象 | 已完成 |
+| GPGPUSIM-HITLAT-014 | 增加 refcount、queue、FIFO、MSHR、外部 mem queue 的正式 max watermark 统计接口，并在 testcase 中直接断言最大水位 | 已完成 |
 
 ### 验收标准
 
@@ -116,9 +117,10 @@
 4. Feature/testcase 文档已建立 `F-HITLAT-*` 和 `TC-HITLAT-*` 追踪。
 5. 新增和待实现 feature/testcase 已按配置、输入、流程、输出四维记录。
 6. 默认新模式下 hit 经 `access_ready()/next_access()` 延迟返回；旧模式仅通过显式 `set_defer_hit_response(false)` 保持兼容。
-7. `TC-HITLAT-001..020`、`TC-FINAL-001/002` 已反标到白盒用例，默认 `./run.sh` 全通过。
+7. `TC-HITLAT-001..020`、`TC-FINAL-001/002`、`TC-WATERMARK-001..003` 已反标到白盒用例，默认 `./run.sh` 全通过。
 8. final check 覆盖 `test_cache_whitebox.cc` 中每个直接创建的 baseline/read-only/data cache、texture cache、tag_array、mshr_table。
-9. 提交前 `git diff --check` 通过。
+9. watermark 覆盖 baseline queue/refcount、MSHR、texture FIFO/ROB/result FIFO、外部 mem queue，并在 coverage 明细中可见统计接口被执行。
+10. 提交前 `git diff --check` 通过。
 
 ### 更新时间
 
@@ -149,7 +151,7 @@
 
 ### 验收标准
 
-1. `./run.sh` 通过：unit 13/13，scenario 86/86 checks，whitebox 40/40，death 16/16。
+1. `./run.sh` 通过：unit 13/13，scenario 86/86 checks，whitebox 41/41，death 16/16。
 2. `./coverage.sh` 通过并输出覆盖率摘要。
 3. Feature/testcase 文档中每条已实现 testcase 映射到测试文件。
 4. 覆盖率基线已记录，低覆盖区域作为后续迭代输入。
@@ -165,10 +167,10 @@
 
 | 指标 | 覆盖率 |
 |------|--------|
-| Region | 56.79% |
-| Function | 74.48% |
-| Line | 70.64% |
-| Branch | 60.57% |
+| Region | 57.63% |
+| Function | 75.84% |
+| Line | 71.80% |
+| Branch | 61.41% |
 
 ### 更新时间
 

@@ -1,0 +1,34 @@
+cat << 'PATCH' > tag_patch.diff
+--- gpgpu_cache/gpu_cache_ref.cc
++++ gpgpu_cache/gpu_cache_ref.cc
+@@ -2313,11 +2313,20 @@
+   return m_fragment_fifo.empty() && m_request_fifo.empty() && m_rob.empty() && m_result_fifo.empty();
+ }
+ 
++unsigned tag_array::max_pending_response_count() const {
++  unsigned max_ref = 0;
++  for (unsigned i = 0; i < m_config.get_num_lines(); i++) {
++    if (m_lines[i]->get_max_pending_response_count() > max_ref) {
++      max_ref = m_lines[i]->get_max_pending_response_count();
++    }
++  }
++  return max_ref;
++}
++
+ baseline_queue_watermark_stats baseline_cache::queue_watermarks() const {
+   mshr_watermark_stats mshr = m_mshrs.watermarks();
+   baseline_queue_watermark_stats stats = {
+       m_max_miss_queue_size,
+       m_max_extra_mf_fields_size,
+       m_max_hit_response_queue_size,
+       m_max_ready_response_queue_size,
+       m_max_pending_response_indices_size,
+       mshr.entries,
+       mshr.merged,
+       mshr.ready,
+-      m_max_line_refcount};
++      m_tag_array->max_pending_response_count()};
+   return stats;
+ }
+PATCH
+patch -p0 < tag_patch.diff

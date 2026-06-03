@@ -1,10 +1,10 @@
 Filename                      Regions    Missed Regions     Cover   Functions  Missed Functions  Executed       Lines      Missed Lines     Cover    Branches   Missed Branches     Cover
 -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-gpu_cache_ref.cc                 1677               633    62.25%         116                20    82.76%        1743               350    79.92%         919               310    66.27%
-gpu_cache_ref.h                   670               240    64.18%         184                40    78.26%         914               190    79.21%         256                68    73.44%
+gpu_cache_ref.cc                 1662               744    55.23%         114                28    75.44%        1740               525    69.83%         905               380    58.01%
+gpu_cache_ref.h                   670               244    63.58%         184                44    76.09%         920               225    75.54%         256                68    73.44%
 -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-TOTAL                            2347               873    62.80%         300                60    80.00%        2657               540    79.68%        1175               378    67.83%
+TOTAL                            2332               988    57.63%         298                72    75.84%        2660               750    71.80%        1161               448    61.41%
 
 Note: llvm-cov reported mismatched function data while merging profiles from multiple test binaries.
-The raw diagnostic is saved in coverage/coverage-warnings.txt.
+The raw diagnostic is saved in coverage-refcount-watermark/coverage-warnings.txt.
 The coverage table above is still generated from all unit/scenario/whitebox profiles.

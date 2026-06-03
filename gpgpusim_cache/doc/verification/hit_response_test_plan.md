@@ -37,6 +37,9 @@
 | F-HITLAT-015 | DataStore snapshot timing | hit accepted 时快照语义与延迟 token 返回不混淆 |
 | F-FINAL-001 | baseline/tag/MSHR final guard | baseline/read-only/data cache、tag_array、mshr_table 收尾状态自动检查并可回到初始态 |
 | F-FINAL-002 | texture cache final guard | texture FIFO/ROB/extra fields/tag/data block 收尾状态自动检查并可回到初始态 |
+| F-WATERMARK-001 | baseline queue/refcount watermark | baseline queue、pending response index、line refcount 最大水位可统计、可断言 |
+| F-WATERMARK-002 | MSHR watermark | MSHR entry、merge、ready 最大水位可统计、可断言 |
+| F-WATERMARK-003 | texture FIFO watermark | texture FIFO/ROB/result FIFO/extra fields 最大水位可统计、可断言 |
 
 ## Implemented Testcase
 
@@ -64,6 +67,9 @@
 | TC-HITLAT-020 | F-HITLAT-015 | unit | Implemented | DataStore hit accepted 时快照语义被文档和场景测试固定，不误当成 coherence 行为 |
 | TC-FINAL-001 | F-FINAL-001 | unit | Implemented | 每个白盒用例中创建的 baseline cache 派生对象、tag_array、mshr_table 均由 final guard 收尾检查 |
 | TC-FINAL-002 | F-FINAL-002 | unit | Implemented | 每个白盒用例中创建的 texture cache 均由 final guard 收尾检查 |
+| TC-WATERMARK-001 | F-WATERMARK-001 | unit | Implemented | baseline `queue_watermarks()` 断言 hit/ready response queue、pending response index、line refcount、外部 mem queue 最大水位 |
+| TC-WATERMARK-002 | F-WATERMARK-002 | unit | Implemented | MSHR `watermarks()` 断言 entry、merge、ready 最大水位 |
+| TC-WATERMARK-003 | F-WATERMARK-003 | unit | Implemented | texture `queue_watermarks()` 断言 fragment/request/result FIFO、ROB、extra fields、外部 mem queue 最大水位 |
 
 ## 关键测试场景
 
@@ -142,6 +148,14 @@
 5. MSHR merge 场景按 accepted mf 个数增加 refcount，而不是按 line 只加一次。
 6. sector cache 第一阶段使用 line-level pin，任一 sector pending 会保护整条 line。
 
+### Watermark / coverage
+
+1. `baseline_cache::queue_watermarks()` 上报 miss queue、extra fields、hit response queue、ready response queue、pending response index、MSHR 和 line refcount 最大水位。
+2. `mshr_table::watermarks()` 上报 MSHR entry、merge 深度、ready response 队列最大水位。
+3. `tex_cache::queue_watermarks()` 上报 fragment FIFO、request FIFO、ROB、result FIFO、extra fields 和 line refcount 最大水位。
+4. `simple_mem_interface::max_queue_occupancy` 上报测试侧外部 memory queue 最大水位。
+5. 白盒 testcase 必须对相关 watermark 做显式 `CHECK_EQ` 断言；coverage 明细必须能看到这些统计接口被执行。
+
 ## 回归要求
 
 实现阶段必须通过：
@@ -157,7 +171,9 @@
 
 2026-06-02 交付模式调整为默认新模式，旧模式仅作为显式兼容开关保留；所有默认回归用例按新模式运行。新增 `TC-FINAL-001/002` final check 专项用例后，`./run.sh` 通过。
 
-2026-06-02 final check 升级为白盒用例对象级 RAII guard：`test_cache_whitebox.cc` 中每个直接创建的 baseline/read-only/data cache、texture cache、tag_array、mshr_table 都在用例退出时自动收尾检查。`./run.sh` 通过：unit `13/13`、scenario `86/86 checks`、whitebox `40/40`、death `16/16`。覆盖率通过 `./coverage.sh coverage-final-guards` 刷新：Total Region `56.79%`、Function `74.48%`、Line `70.64%`、Branch `60.57%`。
+2026-06-02 final check 升级为白盒用例对象级 RAII guard：`test_cache_whitebox.cc` 中每个直接创建的 baseline/read-only/data cache、texture cache、tag_array、mshr_table 都在用例退出时自动收尾检查，并纳入默认回归。
+
+2026-06-02 新增 refcount/queue/FIFO 正式 max watermark 统计与断言：`cache_block_t`、`mshr_table`、`baseline_cache`、`tex_cache`、`simple_mem_interface` 均提供可观测最大水位；白盒测试新增 `refcount_block_accessors_track_current_and_max`，并在 hit queue、MSHR merge、sector pin、write-evict pin、texture FIFO/ROB/result FIFO 场景中断言最大水位。`./run.sh` 通过：unit `13/13`、scenario `86/86 checks`、whitebox `41/41`、death `16/16`。覆盖率通过 `./coverage.sh coverage-refcount-watermark` 刷新：Total Region `57.63%`、Function `75.84%`、Line `71.80%`、Branch `61.41%`。
 
 交付时同步更新：
 

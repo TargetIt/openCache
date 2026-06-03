@@ -333,13 +333,19 @@ class simple_mem_interface : public mem_fetch_interface {
 public:
     std::list<mem_fetch *> queue;
     unsigned max_queue_size;
+    unsigned max_queue_occupancy;
 
-    simple_mem_interface(unsigned max_size = 256) : max_queue_size(max_size) {}
+    simple_mem_interface(unsigned max_size = 256)
+        : max_queue_size(max_size), max_queue_occupancy(0) {}
 
     bool full(unsigned, bool) const override {
         return queue.size() >= max_queue_size;
     }
-    void push(mem_fetch *mf) override { queue.push_back(mf); }
+    void push(mem_fetch *mf) override {
+        queue.push_back(mf);
+        if (queue.size() > max_queue_occupancy)
+            max_queue_occupancy = queue.size();
+    }
 };
 
 // ---- Hashing functions (from hashing.h, used by cache_config) ----
