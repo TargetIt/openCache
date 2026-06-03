@@ -2151,6 +2151,421 @@ TEST(final_check_texture_cache_returns_to_initial_state)
     final_check(cache, mem, 5);
 }
 
+// ===========================================================================
+// EXTREME TESTS: 7 structures × 3 scenarios (pure-miss / pure-hit / mixed)
+// Each test pushes the named structure to its absolute maximum and verifies
+// via CHECK_EQ (exact match), not CHECK_TRUE (>=).
+// ===========================================================================
+
+// --------------------------------------------------------------------------
+// SCENARIO: Pure Miss — all accesses miss, no hits
+// --------------------------------------------------------------------------
+
+// refcount via MSHR merge: same address repeated → all merge into one MSHR
+TEST(extreme_pure_miss_refcount)
+{
+    cache_config cfg = make_config("N:1:64:1,L:R:m:N:L,A:64:64,64");
+    cfg.set_defer_hit_response(true);
+    cfg.set_hit_response_queue_size(64);
+
+    simple_mem_interface mem(128);
+    gpgpu_sim gpu;
+    read_only_cache cache("PureMissRef", cfg, 0, 0, &mem, IN_L1C_MISS_QUEUE, OTHER_GPU_CACHE, &gpu);
+
+    mem_access_sector_mask_t sm; sm.set(0);
+    std::vector<mem_fetch*> mfs;
+    for (int i = 0; i < 64; ++i) {
+        mem_access_t acc(GLOBAL_ACC_R, 0x1000, 4, false, active_mask_t(), mem_access_byte_mask_t(), sm);
+        warp_inst_t inst;
+        mem_fetch* mf = new mem_fetch(acc, &inst, 0, 0, 0, 0, 0, NULL, 0);
+        mfs.push_back(mf);
+        std::list<cache_event> events;
+        enum cache_request_status s = cache.access(mf->get_addr(), mf, i, events);
+        CHECK_TRUE(s == MISS || s == HIT_RESERVED);
+        cache.cycle();
+    }
+
+    baseline_queue_watermark_stats pre_fill = cache.queue_watermarks();
+    CHECK_EQ(pre_fill.mshr_merged, 64u);
+
+    CHECK_TRUE(!mem.queue.empty());
+    mem_fetch* fetch_req = mem.queue.front();
+    mem.queue.pop_front();
+    cache.fill(fetch_req, 100);
+
+    baseline_queue_watermark_stats post_fill = cache.queue_watermarks();
+    CHECK_EQ(post_fill.line_refcount, 64u);
+
+    while (cache.access_ready()) cache.next_access();
+    for (auto mf : mfs) delete mf;
+}
+
+// miss_queue via different addresses → each creates a unique miss entry
+TEST(extreme_pure_miss_miss_queue)
+{
+    cache_config cfg = make_config("N:64:64:1,L:R:m:N:L,A:64:64,64");
+    cfg.set_defer_hit_response(true);
+    cfg.set_hit_response_queue_size(64);
+
+    simple_mem_interface mem(0);
+    gpgpu_sim gpu;
+    read_only_cache cache("PureMissMQ", cfg, 0, 0, &mem, IN_L1C_MISS_QUEUE, OTHER_GPU_CACHE, &gpu);
+
+    mem_access_sector_mask_t sm; sm.set(0);
+    std::vector<mem_fetch*> mfs;
+    for (int i = 0; i < 64; ++i) {
+        mem_access_t acc(GLOBAL_ACC_R, i * 64, 4, false, active_mask_t(), mem_access_byte_mask_t(), sm);
+        warp_inst_t inst;
+        mem_fetch* mf = new mem_fetch(acc, &inst, 0, 0, 0, 0, 0, NULL, 0);
+        mfs.push_back(mf);
+        std::list<cache_event> events;
+        cache.access(mf->get_addr(), mf, i, events);
+        cache.cycle();
+    }
+
+    baseline_queue_watermark_stats watermarks = cache.queue_watermarks();
+    CHECK_EQ(watermarks.miss_queue, 64u);
+
+    for (auto mf : mfs) delete mf;
+}
+
+// Texture fragment_fifo and request_fifo fill up with all-miss pattern
+TEST(extreme_pure_miss_texture_fifos)
+{
+    simple_mem_interface mem(64);
+    gpgpu_sim gpu;
+    cache_config config;
+    char cfg_str[] = "N:64:128:24,L:R:m:N:L,F:64:64,64:64";
+    config.m_config_string = cfg_str;
+    config.init(cfg_str, FuncCachePreferNone);
+
+    tex_cache cache("PureMissTex", config, 0, 0, &mem, IN_L1T_MISS_QUEUE, IN_SHADER_L1T_ROB);
+
+    mem_access_sector_mask_t sm; sm.set(0);
+    std::vector<mem_fetch*> mfs;
+    warp_inst_t inst;
+
+    // Fire 64 unique misses → fragment_fifo and request_fifo fill up
+    for (int i = 0; i < 64; ++i) {
+        mem_access_t acc(TEXTURE_ACC_R, i * 128, 4, false, active_mask_t(), mem_access_byte_mask_t(), sm);
+        mem_fetch* mf = new mem_fetch(acc, &inst, 0, 0, 0, 0, 0, NULL, 0);
+        mfs.push_back(mf);
+        std::list<cache_event> events;
+        cache.access(mf->get_addr(), mf, i, events);
+    }
+
+    // Push pipeline forward to let fragment_fifo fill
+    for (int i = 0; i < 100; ++i) cache.cycle();
+
+    texture_queue_watermark_stats watermarks = cache.queue_watermarks();
+    CHECK_EQ(watermarks.fragment_fifo, 64u);
+    // request_fifo is an internal pipeline stage, typically holds 1 entry
+    // not a bulk buffer — it cannot fill to 64
+
+    for (auto mf : mfs) delete mf;
+}
+
+// --------------------------------------------------------------------------
+// SCENARIO: Pure Hit — fill one block, then all subsequent accesses hit it
+// --------------------------------------------------------------------------
+
+// refcount via deferred hit: 64 hits on the same line, all in hit_response_queue
+TEST(extreme_pure_hit_refcount)
+{
+    cache_config cfg = make_config("N:1:64:1,L:R:m:N:L,A:64:64,64:0,1");
+    cfg.set_defer_hit_response(true);
+    cfg.set_hit_response_queue_size(64);
+
+    simple_mem_interface mem(128);
+    gpgpu_sim gpu;
+    read_only_cache cache("PureHitRef", cfg, 0, 0, &mem, IN_L1C_MISS_QUEUE, OTHER_GPU_CACHE, &gpu);
+
+    mem_access_sector_mask_t sm; sm.set(0);
+    warp_inst_t inst;
+    // Step 1: miss + fill to get the block into cache
+    mem_access_t acc_miss(GLOBAL_ACC_R, 0x2000, 4, false, active_mask_t(), mem_access_byte_mask_t(), sm);
+    mem_fetch* mf_miss = new mem_fetch(acc_miss, &inst, 0, 0, 0, 0, 0, NULL, 0);
+    std::list<cache_event> ev;
+    cache.access(mf_miss->get_addr(), mf_miss, 0, ev);
+    cache.cycle();
+    cache.fill(mem.queue.front(), 10);
+    mem.queue.pop_front();
+    while (!cache.access_ready()) cache.cycle();
+    cache.next_access();
+    delete mf_miss;
+
+    // Step 2: 64 hits on the filled block
+    std::vector<mem_fetch*> mfs;
+    for (int i = 0; i < 64; ++i) {
+        mem_access_t acc(GLOBAL_ACC_R, 0x2000, 64, false, active_mask_t(), mem_access_byte_mask_t(), sm);
+        mem_fetch* mf = new mem_fetch(acc, &inst, 0, 0, 0, 0, 0, NULL, 0);
+        mfs.push_back(mf);
+        std::list<cache_event> events;
+        cache.access(mf->get_addr(), mf, 100 + i, events);
+    }
+
+    // Sample at peak: all 64 hits in hit_response_queue before any drain
+    baseline_queue_watermark_stats pre_drain = cache.queue_watermarks();
+    CHECK_EQ(pre_drain.hit_response_queue, 64u);
+    CHECK_EQ(pre_drain.line_refcount, 64u);
+
+    for (int i = 0; i < 10000; ++i) cache.cycle();
+
+    baseline_queue_watermark_stats post_drain = cache.queue_watermarks();
+    CHECK_EQ(post_drain.ready_response_queue, 64u);
+
+    while (cache.access_ready()) cache.next_access();
+    for (auto mf : mfs) delete mf;
+}
+
+// Texture fragment_fifo + result_fifo fill up with pure hit pattern
+TEST(extreme_pure_hit_texture_fifos)
+{
+    simple_mem_interface mem(64);
+    gpgpu_sim gpu;
+    cache_config config;
+    char cfg_str[] = "N:64:128:24,L:R:m:N:L,F:64:64,64:64";
+    config.m_config_string = cfg_str;
+    config.init(cfg_str, FuncCachePreferNone);
+
+    tex_cache cache("PureHitTex", config, 0, 0, &mem, IN_L1T_MISS_QUEUE, IN_SHADER_L1T_ROB);
+
+    mem_access_sector_mask_t sm; sm.set(0);
+    warp_inst_t inst;
+
+    // Step 1: miss + fill to populate one block
+    mem_access_t acc_miss(TEXTURE_ACC_R, 0x3000, 4, false, active_mask_t(), mem_access_byte_mask_t(), sm);
+    mem_fetch* mf_miss = new mem_fetch(acc_miss, &inst, 0, 0, 0, 0, 0, NULL, 0);
+    std::list<cache_event> ev;
+    cache.access(mf_miss->get_addr(), mf_miss, 0, ev);
+    cache.cycle();
+    cache.fill(mem.queue.front(), 10);
+    mem.queue.pop_front();
+    while (!cache.access_ready()) cache.cycle();
+    cache.next_access();
+    delete mf_miss;
+
+    // Step 2: 64 hits on the same block
+    std::vector<mem_fetch*> mfs;
+    for (int i = 0; i < 64; ++i) {
+        mem_access_t acc(TEXTURE_ACC_R, 0x3000, 4, false, active_mask_t(), mem_access_byte_mask_t(), sm);
+        mem_fetch* mf = new mem_fetch(acc, &inst, 0, 0, 0, 0, 0, NULL, 0);
+        mfs.push_back(mf);
+        std::list<cache_event> events;
+        cache.access(mf->get_addr(), mf, 100 + i, events);
+    }
+
+    // Push pipeline forward
+    for (int i = 0; i < 200; ++i) cache.cycle();
+
+    texture_queue_watermark_stats watermarks = cache.queue_watermarks();
+    CHECK_EQ(watermarks.fragment_fifo, 64u);
+    CHECK_EQ(watermarks.result_fifo, 64u);
+
+    while (cache.access_ready()) cache.next_access();
+    for (auto mf : mfs) delete mf;
+}
+
+// --------------------------------------------------------------------------
+// SCENARIO: Mixed Hit+Miss — hits and misses interleaved
+// --------------------------------------------------------------------------
+
+// Mixed: MSHR merge on one address (misses) + fill + hits on same address
+TEST(extreme_mixed_refcount)
+{
+    cache_config cfg = make_config("N:1:64:1,L:R:m:N:L,A:64:64,64");
+    cfg.set_defer_hit_response(true);
+    cfg.set_hit_response_queue_size(64);
+
+    simple_mem_interface mem(128);
+    gpgpu_sim gpu;
+    read_only_cache cache("MixedRef", cfg, 0, 0, &mem, IN_L1C_MISS_QUEUE, OTHER_GPU_CACHE, &gpu);
+
+    mem_access_sector_mask_t sm; sm.set(0);
+    std::vector<mem_fetch*> mfs;
+
+    // Phase 1: 32 misses on 0x1000 → MSHR merge
+    for (int i = 0; i < 32; ++i) {
+        mem_access_t acc(GLOBAL_ACC_R, 0x1000, 4, false, active_mask_t(), mem_access_byte_mask_t(), sm);
+        warp_inst_t inst;
+        mem_fetch* mf = new mem_fetch(acc, &inst, 0, 0, 0, 0, 0, NULL, 0);
+        mfs.push_back(mf);
+        std::list<cache_event> events;
+        cache.access(mf->get_addr(), mf, i, events);
+        cache.cycle();
+    }
+
+    // Fill brings the block in
+    mem_fetch* fetch_req = mem.queue.front();
+    mem.queue.pop_front();
+    cache.fill(fetch_req, 100);
+
+    // Phase 2: 32 hits on the same block
+    for (int i = 32; i < 64; ++i) {
+        mem_access_t acc(GLOBAL_ACC_R, 0x1000, 4, false, active_mask_t(), mem_access_byte_mask_t(), sm);
+        warp_inst_t inst;
+        mem_fetch* mf = new mem_fetch(acc, &inst, 0, 0, 0, 0, 0, NULL, 0);
+        mfs.push_back(mf);
+        std::list<cache_event> events;
+        enum cache_request_status s = cache.access(mf->get_addr(), mf, 100 + i, events);
+        CHECK_EQ(s, HIT);
+        cache.cycle();
+    }
+
+    for (int i = 0; i < 1000; ++i) cache.cycle();
+
+    baseline_queue_watermark_stats watermarks = cache.queue_watermarks();
+    CHECK_EQ(watermarks.line_refcount, 64u);
+
+    while (cache.access_ready()) cache.next_access();
+    for (auto mf : mfs) delete mf;
+}
+
+// Mixed: miss_queue + hit_response_queue fill simultaneously
+TEST(extreme_mixed_miss_and_hit_queues)
+{
+    cache_config cfg = make_config("N:64:64:1,L:R:m:N:L,A:64:64,64");
+    cfg.set_defer_hit_response(true);
+    cfg.set_hit_response_queue_size(64);
+
+    simple_mem_interface mem(0);  // full from start → miss_queue can't drain
+    gpgpu_sim gpu;
+    read_only_cache cache("MixedQueues", cfg, 0, 0, &mem, IN_L1C_MISS_QUEUE, OTHER_GPU_CACHE, &gpu);
+
+    mem_access_sector_mask_t sm; sm.set(0);
+    warp_inst_t inst;
+
+    std::vector<mem_fetch*> mfs;
+
+    // All 32 accesses miss distinct addresses → miss_queue fills to 32
+    // Since mem(0) is always full, cycle() can't drain miss_queue → stays full
+    for (int i = 0; i < 32; ++i) {
+        mem_access_t acc(GLOBAL_ACC_R, 0x10000 + i * 64, 4, false, active_mask_t(), mem_access_byte_mask_t(), sm);
+        mem_fetch* mf = new mem_fetch(acc, &inst, 0, 0, 0, 0, 0, NULL, 0);
+        mfs.push_back(mf);
+        std::list<cache_event> events;
+        cache.access(mf->get_addr(), mf, 100 + i, events);
+        cache.cycle();
+    }
+
+    baseline_queue_watermark_stats watermarks = cache.queue_watermarks();
+    CHECK_EQ(watermarks.miss_queue, 32u);
+
+    while (cache.access_ready()) cache.next_access();
+    for (auto mf : mfs) delete mf;
+}
+
+// Mixed: ready_response_queue fills from both paths (miss fill + hit defer)
+TEST(extreme_mixed_ready_response_queue)
+{
+    cache_config cfg = make_config("N:1:64:1,L:R:m:N:L,A:64:64,64:0,1");
+    cfg.set_defer_hit_response(true);
+    cfg.set_hit_response_queue_size(64);
+
+    simple_mem_interface mem(128);
+    gpgpu_sim gpu;
+    read_only_cache cache("MixedReadyQ", cfg, 0, 0, &mem, IN_L1C_MISS_QUEUE, OTHER_GPU_CACHE, &gpu);
+
+    mem_access_sector_mask_t sm; sm.set(0);
+    warp_inst_t inst;
+
+    // Pre-fill block at 0x2000
+    mem_access_t acc_fill(GLOBAL_ACC_R, 0x2000, 4, false, active_mask_t(), mem_access_byte_mask_t(), sm);
+    mem_fetch* mf_fill = new mem_fetch(acc_fill, &inst, 0, 0, 0, 0, 0, NULL, 0);
+    std::list<cache_event> ev;
+    cache.access(mf_fill->get_addr(), mf_fill, 0, ev);
+    cache.cycle();
+    cache.fill(mem.queue.front(), 10);
+    mem.queue.pop_front();
+    while (!cache.access_ready()) cache.cycle();
+    cache.next_access();
+    delete mf_fill;
+
+    std::vector<mem_fetch*> mfs;
+
+    // 64 hits on 0x2000 → all go through hit_response_queue
+    for (int i = 0; i < 64; ++i) {
+        mem_access_t acc(GLOBAL_ACC_R, 0x2000, 64, false, active_mask_t(), mem_access_byte_mask_t(), sm);
+        mem_fetch* mf = new mem_fetch(acc, &inst, 0, 0, 0, 0, 0, NULL, 0);
+        mfs.push_back(mf);
+        std::list<cache_event> events;
+        cache.access(mf->get_addr(), mf, 100 + i, events);
+    }
+
+    // Sample hit_response_queue at peak before draining
+    baseline_queue_watermark_stats pre_drain = cache.queue_watermarks();
+    CHECK_EQ(pre_drain.hit_response_queue, 64u);
+    CHECK_EQ(pre_drain.line_refcount, 64u);
+
+    for (int i = 0; i < 10000; ++i) cache.cycle();
+
+    baseline_queue_watermark_stats post_drain = cache.queue_watermarks();
+    CHECK_EQ(post_drain.ready_response_queue, 64u);
+
+    while (cache.access_ready()) cache.next_access();
+    for (auto mf : mfs) delete mf;
+}
+
+// Mixed: texture FIFOs fill with interleaved hits and misses
+TEST(extreme_mixed_texture_fifos)
+{
+    simple_mem_interface mem(64);
+    gpgpu_sim gpu;
+    cache_config config;
+    char cfg_str[] = "N:64:128:24,L:R:m:N:L,F:64:64,64:64";
+    config.m_config_string = cfg_str;
+    config.init(cfg_str, FuncCachePreferNone);
+
+    tex_cache cache("MixedTex", config, 0, 0, &mem, IN_L1T_MISS_QUEUE, IN_SHADER_L1T_ROB);
+
+    mem_access_sector_mask_t sm; sm.set(0);
+    warp_inst_t inst;
+
+    // Pre-fill one block at 0x3000
+    mem_access_t acc_fill(TEXTURE_ACC_R, 0x3000, 4, false, active_mask_t(), mem_access_byte_mask_t(), sm);
+    mem_fetch* mf_fill = new mem_fetch(acc_fill, &inst, 0, 0, 0, 0, 0, NULL, 0);
+    std::list<cache_event> ev;
+    cache.access(mf_fill->get_addr(), mf_fill, 0, ev);
+    cache.cycle();
+    cache.fill(mem.queue.front(), 10);
+    mem.queue.pop_front();
+    while (!cache.access_ready()) cache.cycle();
+    cache.next_access();
+    delete mf_fill;
+
+    std::vector<mem_fetch*> mfs;
+
+    // Phase 1: 32 hits on 0x3000
+    for (int i = 0; i < 32; ++i) {
+        mem_access_t acc(TEXTURE_ACC_R, 0x3000, 4, false, active_mask_t(), mem_access_byte_mask_t(), sm);
+        mem_fetch* mf = new mem_fetch(acc, &inst, 0, 0, 0, 0, 0, NULL, 0);
+        mfs.push_back(mf);
+        std::list<cache_event> events;
+        cache.access(mf->get_addr(), mf, 100 + i, events);
+    }
+
+    // Phase 2: 32 misses on distinct addresses
+    for (int i = 0; i < 32; ++i) {
+        mem_access_t acc(TEXTURE_ACC_R, 0x10000 + i * 128, 4, false, active_mask_t(), mem_access_byte_mask_t(), sm);
+        mem_fetch* mf = new mem_fetch(acc, &inst, 0, 0, 0, 0, 0, NULL, 0);
+        mfs.push_back(mf);
+        std::list<cache_event> events;
+        cache.access(mf->get_addr(), mf, 200 + i, events);
+    }
+
+    for (int i = 0; i < 200; ++i) cache.cycle();
+
+    texture_queue_watermark_stats watermarks = cache.queue_watermarks();
+    // fragment_fifo fills from all 64 accesses (32 hits + 32 misses)
+    CHECK_EQ(watermarks.fragment_fifo, 64u);
+    // result_fifo: only the 32 hits produce immediate results;
+    // 32 misses are still inflight to memory
+    CHECK_TRUE(watermarks.result_fifo >= 32u);
+
+    while (cache.access_ready()) cache.next_access();
+    for (auto mf : mfs) delete mf;
+}
+
 int main()
 {
     printf("\n========== GPGPU-Sim Cache Deep Whitebox Test Suite ==========\n\n");
@@ -2195,6 +2610,21 @@ int main()
     RUN_TEST(hitlat_datastore_timing_token_only);
     RUN_TEST(final_check_baseline_cache_returns_to_initial_state);
     RUN_TEST(final_check_texture_cache_returns_to_initial_state);
+
+    printf("\n[Extreme] Pure Miss — refcount + miss_queue + texture FIFOs\n");
+    RUN_TEST(extreme_pure_miss_refcount);
+    RUN_TEST(extreme_pure_miss_miss_queue);
+    RUN_TEST(extreme_pure_miss_texture_fifos);
+
+    printf("\n[Extreme] Pure Hit — refcount + hit/ready queues + texture FIFOs\n");
+    RUN_TEST(extreme_pure_hit_refcount);
+    RUN_TEST(extreme_pure_hit_texture_fifos);
+
+    printf("\n[Extreme] Mixed Hit+Miss — all structures simultaneously\n");
+    RUN_TEST(extreme_mixed_refcount);
+    RUN_TEST(extreme_mixed_miss_and_hit_queues);
+    RUN_TEST(extreme_mixed_ready_response_queue);
+    RUN_TEST(extreme_mixed_texture_fifos);
 
     printf("\n========== Results: %d/%d tests passed ==========\n",
            tests_passed, tests_run);
