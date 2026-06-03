@@ -10,7 +10,7 @@ extracted for standalone compilation and testing.
 ./run.sh
 ```
 
-That's it. Builds and runs all 12 tests in one command.
+That's it. Builds and runs all 13 tests in one command.
 
 ## Manual Build
 
@@ -50,7 +50,7 @@ hierarchical stats aggregation, zero cache logic impact).
 | `gpgpu_cache/gpu_cache_ref.h` | Derived from `gpu-cache.h` | **Only `#include` lines changed** |
 | `gpgpu_cache/gpu_cache_ref.cc` | Derived from `gpu-cache.cc` | **Only `#include` + 3 stub function bodies** |
 | `gpgpu_cache/gpgpu_stubs.h` | Written for this reference | Provides GPGPU-Sim dependencies |
-| `test/test_main.cc` | Written for this reference | 12 tests covering all cache types |
+| `test/test_main.cc` | Written for this reference | 13 tests covering all cache types |
 | `run.sh` | One-click build & test script | |
 
 ## Cache Types Provided

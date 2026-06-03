@@ -1,0 +1,28 @@
+# Built binaries
+test_gpgpu_cache_ref
+test_scenario
+test_cache_whitebox
+test_death
+test_minimal
+test_gpgpu_cache_ref_cov
+test_scenario_cov
+test_cache_whitebox_cov
+
+# Debug symbols
+*.dSYM/
+
+# Coverage data
+*.profraw
+*.profdata
+coverage/
+coverage-refcount-watermark/
+
+# Temp files
+*.tmp
+*.orig
+*.rej
+*.patch
+*.diff
+
+# Build
+build/

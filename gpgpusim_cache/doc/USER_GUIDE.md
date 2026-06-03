@@ -1693,7 +1693,7 @@ SECTOR (S):
 ### 4.6 附录 E：文件结构
 
 ```
-reference/
+gpgpusim_cache/
 ├── USER_GUIDE.md              — 本手册
 ├── README.md                  — 简要说明
 ├── CMakeLists.txt             — CMake 构建
@@ -1711,7 +1711,7 @@ reference/
 │   ├── mem_fetch.h            — 原始 mem_fetch (未修改)
 │   └── mem_fetch_status.tup   — 状态枚举定义 (未修改)
 └── test/
-    ├── test_main.cc           — 12 个单元测试
+    ├── test_main.cc           — 13 个单元测试
     └── test_scenario.cc       — 9 个场景集成测试
 ```
 
