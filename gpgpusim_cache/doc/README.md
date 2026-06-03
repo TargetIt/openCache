@@ -60,7 +60,7 @@ hierarchical stats aggregation, zero cache logic impact).
 | `CMakeLists.txt` | CMake build config | |
 | `coverage.sh` | Coverage report script | |
 
-### Preserved originals (`gpgpu_cache/reference-only-originals/`) — not compiled
+### Preserved originals (`../reference-only-originals-gpgpusim/`) — not compiled
 
 These are the **UNMODIFIED** GPGPU-Sim source files, kept solely as a correctness baseline.
 They are never compiled into the standalone reference build.
